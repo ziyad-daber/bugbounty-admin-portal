@@ -1,164 +1,166 @@
 'use client'
-
 import React, { useState } from 'react';
 import { useAccount, useWriteContract, useChainId } from 'wagmi';
 import { generateKey, encryptData, exportKey } from '@/services/encryption';
 import { uploadToIPFS } from '@/services/ipfs';
 import { BUG_BOUNTY_PLATFORM_ABI, CONTRACT_ADDRESS } from '@/services/contracts';
 import { ethers } from 'ethers';
-import { WalletConnect } from '@/components/WalletConnect';
-import Link from 'next/link';
+import { Lock, Upload, Send, CheckCircle, Shield, AlertCircle, Key } from 'lucide-react';
+
+const steps = [
+  { icon: Lock, label: 'Encrypt' },
+  { icon: Upload, label: 'Upload IPFS' },
+  { icon: Send, label: 'Submit On-Chain' },
+];
 
 export default function SubmitReportPage() {
-    const { isConnected } = useAccount();
-    const chainId = useChainId();
-    const { writeContractAsync } = useWriteContract();
-    
-    const [bountyIdStr, setBountyIdStr] = useState('0');
-    const [title, setTitle] = useState('');
-    const [steps, setSteps] = useState('');
-    const [impact, setImpact] = useState('');
-    const [poc, setPoc] = useState('');
-    
-    const [status, setStatus] = useState('');
-    const [savedKey, setSavedKey] = useState('');
-    const [hasSavedKey, setHasSavedKey] = useState(false);
+  const { isConnected } = useAccount();
+  const chainId = useChainId();
+  const { writeContractAsync } = useWriteContract();
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!isConnected) {
-            alert("Please connect your wallet first");
-            return;
-        }
+  const [bountyIdStr, setBountyIdStr] = useState('0');
+  const [title, setTitle] = useState('');
+  const [stepsText, setStepsText] = useState('');
+  const [impact, setImpact] = useState('');
+  const [poc, setPoc] = useState('');
 
-        if (!hasSavedKey) {
-            alert("You must securely save your decryption key and check the box to proceed.");
-            return;
-        }
+  const [status, setStatus] = useState('');
+  const [savedKey, setSavedKey] = useState('');
+  const [hasSavedKey, setHasSavedKey] = useState(false);
+  const [currentStep, setCurrentStep] = useState(-1);
+  const [completed, setCompleted] = useState(false);
 
-        if (steps.length < 50 || impact.length < 50 || poc.length < 50) {
-            alert("Quality Control Failed: Content too short. Please provide rigorous detail.");
-            return;
-        }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isConnected) return alert('Please connect your wallet first');
+    if (!hasSavedKey) return alert('You must check the key confirmation box.');
+    if (stepsText.length < 50 || impact.length < 50 || poc.length < 50) return alert('Content too short. Provide rigorous detail.');
 
-        try {
-            setStatus('Generating encryption keys...');
-            const key = await generateKey();
-            const exportedRawKey = await exportKey(key);
-            setSavedKey(exportedRawKey);
+    try {
+      setCurrentStep(0);
+      setStatus('Generating encryption keys...');
+      const key = await generateKey();
+      const exportedRawKey = await exportKey(key);
+      setSavedKey(exportedRawKey);
 
-            setStatus('Encrypting report locally...');
-            const payload = JSON.stringify({ title, steps, impact, poc });
-            const bountyId = parseInt(bountyIdStr);
+      setStatus('Encrypting report locally...');
+      const payload = JSON.stringify({ title, steps: stepsText, impact, poc });
+      const bountyId = parseInt(bountyIdStr);
+      const { ciphertext, iv } = await encryptData(key, payload, chainId, bountyId);
 
-            // Using AAD (chainId, bountyId)
-            const { ciphertext, iv } = await encryptData(key, payload, chainId, bountyId);
+      setCurrentStep(1);
+      setStatus('Uploading encrypted payload to IPFS...');
+      const cid = await uploadToIPFS({ v: '1.0', ciphertext, iv });
 
-            setStatus('Uploading payload to IPFS (Pinata)...');
-            const ipfsData = {
-                v: "1.0",
-                ciphertext,
-                iv,
-            };
-            
-            const cid = await uploadToIPFS(ipfsData);
+      setCurrentStep(2);
+      setStatus('Awaiting wallet signature...');
+      const hSteps = ethers.keccak256(ethers.toUtf8Bytes(stepsText));
+      const hImpact = ethers.keccak256(ethers.toUtf8Bytes(impact));
+      const hPoc = ethers.keccak256(ethers.toUtf8Bytes(poc));
+      const cidDigest = ethers.keccak256(ethers.toUtf8Bytes(cid));
+      const saltBytes = window.crypto.getRandomValues(new Uint8Array(32));
+      const salt = ethers.hexlify(saltBytes);
 
-            setStatus('Awaiting wallet signature for on-chain submission...');
-            
-            const hSteps = ethers.keccak256(ethers.toUtf8Bytes(steps));
-            const hImpact = ethers.keccak256(ethers.toUtf8Bytes(impact));
-            const hPoc = ethers.keccak256(ethers.toUtf8Bytes(poc));
-            const cidDigest = ethers.keccak256(ethers.toUtf8Bytes(cid));
+      await writeContractAsync({
+        abi: BUG_BOUNTY_PLATFORM_ABI as any,
+        address: CONTRACT_ADDRESS as `0x${string}`,
+        functionName: 'submitReport',
+        args: [BigInt(bountyId), salt as `0x${string}`, cidDigest as `0x${string}`, hSteps as `0x${string}`, hImpact as `0x${string}`, hPoc as `0x${string}`],
+      });
 
-            const saltBytes = window.crypto.getRandomValues(new Uint8Array(32));
-            const salt = ethers.hexlify(saltBytes);
+      setCurrentStep(3);
+      setCompleted(true);
+      setStatus('Report submitted successfully!');
+    } catch (error: any) {
+      setStatus(`Failed: ${error.message || 'Unknown error'}`);
+    }
+  };
 
-            await writeContractAsync({
-                abi: BUG_BOUNTY_PLATFORM_ABI as any,
-                address: CONTRACT_ADDRESS as `0x${string}`,
-                functionName: 'submitReport',
-                args: [
-                    BigInt(bountyId),
-                    salt as `0x${string}`,
-                    cidDigest as `0x${string}`,
-                    hSteps as `0x${string}`,
-                    hImpact as `0x${string}`,
-                    hPoc as `0x${string}`
-                ],
-            });
-
-            setStatus('Success! Report submitted securely. Your stake has been locked.');
-            
-        } catch (error: any) {
-            console.error(error);
-            setStatus(`Transaction failed: ${error.message || 'Unknown error'}`);
-        }
-    };
-
-    return (
-        <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10">
-            <header className="w-full max-w-2xl flex justify-between items-center mb-6 px-5">
-                <Link href="/" className="text-blue-600 hover:text-blue-800 text-sm font-semibold">
-                    &larr; Back to Dashboard
-                </Link>
-                <WalletConnect />
-            </header>
-
-            <main className="w-full max-w-2xl px-5 bg-white p-8 rounded-lg shadow border border-gray-100">
-                <h1 className="text-2xl font-bold text-gray-900 mb-6">Submit Vulnerability Report</h1>
-                
-                {savedKey && (
-                    <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-md text-sm text-green-800">
-                        <strong className="block mb-1">Save your decryption key securely!</strong>
-                        <code className="break-all">{savedKey}</code>
-                    </div>
-                )}
-
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Target Bounty ID</label>
-                        <input type="number" value={bountyIdStr} onChange={e => setBountyIdStr(e.target.value)} required min="0" className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:border-blue-500 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Vulnerability Title</label>
-                        <input type="text" value={title} onChange={e => setTitle(e.target.value)} required className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:border-blue-500 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Steps to Reproduce</label>
-                        <textarea value={steps} onChange={e => setSteps(e.target.value)} required rows={4} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:border-blue-500 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Impact</label>
-                        <textarea value={impact} onChange={e => setImpact(e.target.value)} required rows={4} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border focus:border-blue-500 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700">Proof of Concept (PoC)</label>
-                        <textarea value={poc} onChange={e => setPoc(e.target.value)} required rows={4} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm p-2 border font-mono text-sm focus:border-blue-500 focus:ring-blue-500" />
-                    </div>
-                    
-                    <div className="flex items-start mt-4">
-                        <div className="flex items-center h-5">
-                            <input id="key-saved" type="checkbox" checked={hasSavedKey} onChange={(e) => setHasSavedKey(e.target.checked)} className="focus:ring-blue-500 h-4 w-4 text-blue-600 border-gray-300 rounded" />
-                        </div>
-                        <div className="ml-3 text-sm">
-                            <label htmlFor="key-saved" className="font-medium text-gray-700">I confirm that I will securely store my decryption key (generated upon submission)</label>
-                            <p className="text-gray-500 text-xs mt-1">Losing this key means the committee cannot review your report and you will forfeit your stake and bounty reward.</p>
-                        </div>
-                    </div>
-
-                    <div className="pt-4 border-t">
-                        <button type="submit" disabled={!isConnected || !hasSavedKey} className={`w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${(isConnected && hasSavedKey) ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'}`}>
-                            {isConnected ? 'Encrypt & Submit Report (Dynamic Stake Required)' : 'Connect Wallet First'}
-                        </button>
-                    </div>
-                    
-                    {status && (
-                        <div className={`mt-4 text-center text-sm font-medium ${status.includes('Success') ? 'text-green-600' : 'text-blue-600'}`}>
-                            {status}
-                        </div>
-                    )}
-                </form>
-            </main>
+  return (
+    <div className="animate-fade-in max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      {/* Header */}
+      <div className="text-center mb-8">
+        <div className="inline-flex p-3 rounded-2xl bg-brand-50 dark:bg-brand-500/10 mb-4">
+          <Shield className="w-8 h-8 text-brand-600 dark:text-brand-400" />
         </div>
-    );
+        <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white">Submit Vulnerability Report</h1>
+        <p className="mt-2 text-gray-500 dark:text-gray-400">Your report is encrypted client-side before leaving your browser.</p>
+      </div>
+
+      {/* Stepper */}
+      <div className="flex items-center justify-center gap-2 mb-8">
+        {steps.map((s, i) => (
+          <React.Fragment key={i}>
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-300 ${
+              currentStep > i ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+              : currentStep === i ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400 animate-pulse-glow'
+              : 'bg-gray-100 dark:bg-slate-800 text-gray-400 dark:text-gray-500'}`}>
+              {currentStep > i ? <CheckCircle className="w-4 h-4" /> : <s.icon className="w-4 h-4" />}
+              <span className="hidden sm:inline">{s.label}</span>
+            </div>
+            {i < steps.length - 1 && <div className={`w-8 h-0.5 rounded ${currentStep > i ? 'bg-emerald-400' : 'bg-gray-200 dark:bg-slate-700'}`} />}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* Key Display */}
+      {savedKey && (
+        <div className="glass-card p-4 mb-6 border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/5">
+          <div className="flex items-start gap-3">
+            <Key className="w-5 h-5 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-semibold text-emerald-800 dark:text-emerald-300 text-sm">Decryption Key — Save This!</p>
+              <code className="text-xs break-all text-emerald-700 dark:text-emerald-400 mt-1 block">{savedKey}</code>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Form */}
+      <form onSubmit={handleSubmit} className="glass-card p-6 sm:p-8 space-y-5">
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Target Bounty ID</label>
+          <input type="number" value={bountyIdStr} onChange={e => setBountyIdStr(e.target.value)} required min="0" className="input-field" />
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Vulnerability Title</label>
+          <input type="text" value={title} onChange={e => setTitle(e.target.value)} required placeholder="e.g. Reentrancy in withdraw()" className="input-field" />
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Steps to Reproduce</label>
+          <textarea value={stepsText} onChange={e => setStepsText(e.target.value)} required rows={4} placeholder="Detailed steps to reproduce the vulnerability..." className="input-field resize-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Impact Assessment</label>
+          <textarea value={impact} onChange={e => setImpact(e.target.value)} required rows={3} placeholder="Describe the severity and potential damage..." className="input-field resize-none" />
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Proof of Concept</label>
+          <textarea value={poc} onChange={e => setPoc(e.target.value)} required rows={4} placeholder="Working exploit code or proof..." className="input-field resize-none font-mono text-sm" />
+        </div>
+
+        <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/20">
+          <input id="key-saved" type="checkbox" checked={hasSavedKey} onChange={e => setHasSavedKey(e.target.checked)} className="mt-1 w-4 h-4 rounded text-brand-600 focus:ring-brand-500" />
+          <label htmlFor="key-saved" className="text-sm">
+            <span className="font-semibold text-amber-800 dark:text-amber-300">I will securely store my decryption key.</span>
+            <span className="block text-amber-700/70 dark:text-amber-400/70 text-xs mt-0.5">Losing it means the committee cannot decrypt your report — your stake will be forfeited.</span>
+          </label>
+        </div>
+
+        <button type="submit" disabled={!isConnected || !hasSavedKey || completed} className="btn-primary w-full text-base">
+          {!isConnected ? 'Connect Wallet to Submit' : completed ? '✓ Report Submitted' : 'Encrypt & Submit Report'}
+        </button>
+
+        {status && (
+          <div className={`flex items-center gap-2 p-3 rounded-xl text-sm font-medium ${completed
+            ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            : status.includes('Failed') ? 'bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300'
+            : 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300'}`}>
+            {completed ? <CheckCircle className="w-4 h-4" /> : status.includes('Failed') ? <AlertCircle className="w-4 h-4" /> : <div className="w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />}
+            {status}
+          </div>
+        )}
+      </form>
+    </div>
+  );
 }

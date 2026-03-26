@@ -1,0 +1,637 @@
+\documentclass[12pt, a4paper]{report}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\geometry{a4paper, margin=2.5cm}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{amsmath}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Rapport d'Audit de S\'{e}curit\'{e} -- Bug Bounty D\'{e}centralis\'{e}}
+\fancyhead[R]{\small \thepage}
+\fancyfoot[C]{\small Confidentiel -- PFE 2025/2026}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10},
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{red!70!black},
+  showstringspaces=false,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=cyan,
+    pdftitle={Rapport Audit PFE -- Bug Bounty Decentralise},
+}
+
+\title{
+\vspace{-2cm}
+\textbf{Rapport Complet d'Audit de S\'{e}curit\'{e} et d'Analyse Architecturale}\\[0.5cm]
+\large Plateforme de Bug Bounty D\'{e}centralis\'{e}e (MVP)\\[0.3cm]
+\normalsize Projet de Fin d'\'{E}tudes (PFE) -- Cybers\'{e}curit\'{e} \& Blockchain
+}
+\author{Auditeur S\'{e}nior en S\'{e}curit\'{e} Blockchain \& Architecte Logiciel}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+\newpage
+
+\tableofcontents
+\newpage
+
+%==============================================================================
+% CHAPITRE 1 : COMPREHENSION GLOBALE
+%==============================================================================
+\chapter{Compr\'{e}hension Globale du Projet}
+
+\section{Objectif de l'Application}
+La plateforme de Bug Bounty D\'{e}centralis\'{e}e est un syst\`{e}me complet visant \`{a} orchestrer la divulgation de vuln\'{e}rabilit\'{e}s informatiques entre des chercheurs en s\'{e}curit\'{e} (``hunters'') et des propri\'{e}taires de protocoles (``bounty owners'') dans un environnement enti\`{e}rement ``trustless'' -- c'est-\`{a}-dire sans n\'{e}cessiter de tiers de confiance centralis\'{e}.
+
+Dans l'\'{e}cosyst\`{e}me Web2 classique, des plateformes comme HackerOne ou Bugcrowd jouent le r\^{o}le d'interm\'{e}diaires entre les entreprises et les chercheurs. Ce mod\`{e}le pr\'{e}sente plusieurs faiblesses structurelles~:
+\begin{itemize}
+    \item \textbf{Risque de censure}~: la plateforme peut d\'{e}cider unilat\'{e}ralement de rejeter un rapport valide.
+    \item \textbf{Opacit\'{e} des d\'{e}cisions}~: les crit\`{e}res de validation sont souvent subjectifs et non v\'{e}rifiables.
+    \item \textbf{D\'{e}lais de paiement arbitraires}~: les chercheurs n'ont aucune garantie contractuelle de paiement dans un d\'{e}lai pr\'{e}cis.
+    \item \textbf{Point unique de d\'{e}faillance (SPOF)}~: si la plateforme tombe ou est compromise, tout le processus est bloqu\'{e}.
+\end{itemize}
+
+\section{Probl\`{e}me R\'{e}solu}
+Ce MVP r\'{e}sout ces probl\'{e}matiques de mani\`{e}re fondamentale~:
+\begin{enumerate}
+    \item \textbf{S\'{e}questre automatique}~: les fonds de r\'{e}compense sont bloqu\'{e}s dans un contrat intelligent (\texttt{Escrow}) d\`{e}s la cr\'{e}ation du bounty. Le propri\'{e}taire ne peut pas retirer les fonds une fois qu'un rapport est soumis.
+    \item \textbf{Gouvernance par comit\'{e}}~: un groupe d'experts \'{e}lus \'{e}value les rapports de fa\c{c}on ind\'{e}pendante via un syst\`{e}me de vote \`{a} seuil (K-sur-N).
+    \item \textbf{Transparence v\'{e}rifiable}~: chaque \'{e}tape (soumission, vote, r\'{e}solution) est enregistr\'{e}e on-chain sous forme d'\'{e}v\'{e}nements immuables.
+    \item \textbf{Confidentialit\'{e} des failles}~: les rapports sont chiffr\'{e}s c\^{o}t\'{e} client (AES-GCM 256 bits) avant d'\^{e}tre stock\'{e}s sur IPFS.
+\end{enumerate}
+
+\section{Justification de l'Architecture Blockchain}
+L'utilisation de la blockchain Ethereum (ou compatible EVM) est motiv\'{e}e par trois propri\'{e}t\'{e}s fondamentales~:
+\begin{itemize}
+    \item \textbf{Immutabilit\'{e}}~: une fois un \'{e}tat enregistr\'{e} (rapport soumis, vote comptabilis\'{e}), il est impossible de le modifier.
+    \item \textbf{Ex\'{e}cution d\'{e}terministe}~: les r\`{e}gles du jeu sont encod\'{e}es dans le bytecode du Smart Contract. Aucune partie ne peut les alt\'{e}rer apr\`{e}s d\'{e}ploiement.
+    \item \textbf{S\'{e}questre programmable}~: les tokens ERC-20 sont bloqu\'{e}s algorithmiquement et lib\'{e}r\'{e}s uniquement lorsque les conditions contractuelles sont remplies.
+\end{itemize}
+
+%==============================================================================
+% CHAPITRE 2 : ARCHITECTURE COMPLETE
+%==============================================================================
+\chapter{Analyse Compl\`{e}te de l'Architecture}
+
+\section{Vue d'Ensemble}
+L'architecture est hybride (on-chain / off-chain) et se d\'{e}compose en quatre couches distinctes qui interagissent de mani\`{e}re s\'{e}quentielle.
+
+\begin{figure}[H]
+    \centering
+    \framebox[\textwidth]{\rule{0pt}{6cm} \textit{[Diagramme d'Architecture -- Ins\'{e}rer ici le sch\'{e}ma d'interaction entre les 4 couches]}}
+    \caption{Architecture Hybride On-Chain / Off-Chain de la Plateforme}
+    \label{fig:architecture}
+\end{figure}
+
+\section{Couche 1~: Smart Contracts (Solidity)}
+C'est le c\oe{}ur de la logique m\'{e}tier. Elle comprend six fichiers~:
+\begin{itemize}
+    \item \texttt{BugBountyPlatform.sol}~: Contrat principal (passerelle).
+    \item \texttt{IBugBounty.sol}~: Interface d\'{e}finissant les structures, \'{e}v\'{e}nements et erreurs.
+    \item \texttt{Escrow.sol}~: Chambre de compensation des fonds de r\'{e}compense.
+    \item \texttt{StakeManager.sol}~: Coffre-fort pour les d\'{e}p\^{o}ts de garantie des chercheurs.
+    \item \texttt{Reputation.sol}~: Moteur de r\'{e}putation avec d\'{e}croissance temporelle exponentielle.
+    \item \texttt{DisputeModule.sol}~: Orchestrateur du processus d'arbitrage Commit-Reveal.
+\end{itemize}
+
+\section{Couche 2~: Frontend (Next.js + Wagmi + Ethers v6)}
+L'interface utilisateur est une application Next.js (App Router) avec quatre pages principales~:
+\begin{itemize}
+    \item \texttt{/}~: Tableau de bord -- affiche le nombre de bounties et les portails.
+    \item \texttt{/submit}~: Formulaire de soumission avec chiffrement, upload IPFS et signature.
+    \item \texttt{/committee}~: Panneau de vote (Phase 1) et Commit/Reveal (Phase 2).
+    \item \texttt{/dispute}~: Gestion des litiges -- ouverture, escalade, r\'{e}solution.
+\end{itemize}
+
+\section{Couche 3~: Cryptographie (WebCrypto AES-GCM)}
+Trois fichiers \texttt{TypeScript} encapsulent la logique cryptographique~:
+\begin{itemize}
+    \item \texttt{encryption.ts}~: G\'{e}n\'{e}ration de cl\'{e}s AES-256, chiffrement/d\'{e}chiffrement GCM avec AAD.
+    \item \texttt{ipfs.ts}~: Int\'{e}gration Pinata pour l'upload et la r\'{e}cup\'{e}ration de donn\'{e}es chiffr\'{e}es.
+    \item \texttt{contracts.ts}~: ABI JSON complet du contrat et fonctions d'instanciation.
+\end{itemize}
+
+\section{Couche 4~: Stockage D\'{e}centralis\'{e} (IPFS / Pinata)}
+Les donn\'{e}es chiffr\'{e}es (ciphertext + IV) sont post\'{e}es sur IPFS via l'API Pinata. Le CID retourn\'{e} est hach\'{e} via \texttt{keccak256} et soumis on-chain comme empreinte immuable du rapport.
+
+\section{Flux d'Interaction D\'{e}taill\'{e}}
+Voici la s\'{e}quence exacte d'une soumission de rapport~:
+\begin{enumerate}
+    \item Le chercheur remplit le formulaire (titre, steps, impact, PoC) dans le frontend.
+    \item Le navigateur g\'{e}n\`{e}re une cl\'{e} AES-256-GCM via \texttt{window.crypto.subtle.generateKey}.
+    \item Le payload JSON est chiffr\'{e} avec AES-GCM en incluant le \texttt{chainId} et le \texttt{bountyId} comme AAD (Additional Authenticated Data).
+    \item Le ciphertext + IV sont envoy\'{e}s \`{a} IPFS via Pinata. Un CID immuable est retourn\'{e}.
+    \item Le frontend g\'{e}n\`{e}re un sel (\texttt{salt}) al\'{e}atoire de 32 octets.
+    \item Le frontend calcule $H_{steps} = keccak256(\text{steps})$, $H_{impact} = keccak256(\text{impact})$, $H_{poc} = keccak256(\text{poc})$, et $CID_{digest} = keccak256(\text{CID})$.
+    \item Wagmi envoie la transaction \texttt{submitReport(bountyId, salt, cidDigest, hSteps, hImpact, hPoc)} sign\'{e}e par MetaMask.
+    \item Le Smart Contract v\'{e}rifie les contraintes (solvabilit\'{e}, rate limit, deadline), calcule le stake dynamique via \texttt{Reputation}, cr\'{e}e le \texttt{Report}, verrouille le d\'{e}p\^{o}t de garantie dans \texttt{StakeManager}, et \'{e}met l'\'{e}v\'{e}nement \texttt{ReportCommitted}.
+\end{enumerate}
+
+%==============================================================================
+% CHAPITRE 3 : ANALYSE DETAILLEE DU CODE
+%==============================================================================
+\chapter{Analyse D\'{e}taill\'{e}e du Code Source}
+
+\section{\texttt{IBugBounty.sol} -- Interface et Structures de Donn\'{e}es}
+
+\subsection{R\^{o}le}
+Ce fichier d\'{e}finit le contrat d'interface qui sp\'{e}cifie l'ensemble des structures de donn\'{e}es, des \'{e}v\'{e}nements et des erreurs personnalis\'{e}es utilis\'{e}s par la plateforme. Il agit comme le ``contrat social'' entre les diff\'{e}rents modules.
+
+\subsection{Enum \texttt{ReportStatus}}
+D\'{e}finit la machine \`{a} \'{e}tats d'un rapport~:
+\begin{itemize}
+    \item \texttt{Submitted} (0)~: \'{e}tat initial apr\`{e}s soumission.
+    \item \texttt{Accepted} (1)~: le comit\'{e} a valid\'{e} le rapport (votes $\geq$ K).
+    \item \texttt{Rejected} (2)~: le comit\'{e} a rejet\'{e} le rapport (votes de rejet $\geq$ K).
+    \item \texttt{Disputed} (3)~: un litige a \'{e}t\'{e} ouvert par le chercheur.
+    \item \texttt{Finalized} (4)~: \'{e}tat terminal -- r\'{e}compense pay\'{e}e ou stake confisqu\'{e}.
+\end{itemize}
+
+Les transitions autoris\'{e}es sont~:
+$$\text{Submitted} \rightarrow \text{Accepted} \mid \text{Rejected} \mid \text{Disputed}$$
+$$\text{Rejected} \rightarrow \text{Disputed}$$
+$$\text{Accepted} \mid \text{Rejected} \mid \text{Disputed} \rightarrow \text{Finalized}$$
+
+\subsection{Struct \texttt{Bounty} -- Compression de Stockage}
+Le struct \texttt{Bounty} est organis\'{e} pour minimiser les \'{e}critures EVM (\texttt{SSTORE} co\^{u}te 20\,000 gas pour un slot vierge)~:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Variable} & \textbf{Type} & \textbf{Bits} \\ \midrule
+\texttt{owner} & \texttt{address} & 160 \\
+\texttt{submissionDeadline} & \texttt{uint64} & 64 \\
+\texttt{reviewSLA} & \texttt{uint32} & 32 \\ \midrule
+\multicolumn{3}{c}{\textit{Slot 1 : 256/256 bits utilis\'{e}s}} \\ \midrule
+\texttt{token} & \texttt{IERC20 (address)} & 160 \\
+\texttt{rateLimitWindow} & \texttt{uint32} & 32 \\
+\texttt{stakeEscalationBps} & \texttt{uint16} & 16 \\
+\texttt{maxInWindow} & \texttt{uint8} & 8 \\
+\texttt{maxActiveSubmissions} & \texttt{uint8} & 8 \\
+\texttt{committeeSize} & \texttt{uint8} & 8 \\
+\texttt{thresholdK} & \texttt{uint8} & 8 \\
+\texttt{active} & \texttt{bool} & 8 \\ \midrule
+\multicolumn{3}{c}{\textit{Slot 2 : 248/256 bits utilis\'{e}s}} \\ \bottomrule
+\end{tabular}
+\caption{Organisation du stockage du struct \texttt{Bounty} -- Slots 1 et 2}
+\end{table}
+
+Les quatre champs \texttt{uint256} (\texttt{rewardAmount}, \texttt{stakeAmount}, \texttt{escrowBalance}, \texttt{appealBond}) occupent chacun un slot complet car leur taille ne permet pas le packing.
+
+\subsection{Struct \texttt{Report}}
+Le premier slot compresse \texttt{researcher} (160 bits), \texttt{submittedAt} (64 bits), \texttt{paid} (8 bits), \texttt{status} (8 bits), \texttt{acceptVotes} (8 bits) et \texttt{rejectVotes} (8 bits) pour un total de 256 bits -- un seul slot EVM. Les cinq \texttt{bytes32} suivants et le \texttt{uint256 stakeAmount} occupent 6 slots suppl\'{e}mentaires.
+
+\subsection{Erreurs Personnalis\'{e}es}
+Le contrat d\'{e}finit 15 erreurs personnalis\'{e}es (ex: \texttt{InsufficientEscrow}, \texttt{RateLimitExceeded}, \texttt{SLANotExpired}). Celles-ci utilisent les \textit{custom errors} de Solidity 0.8.4+ au lieu de \texttt{require(condition, "message")}, ce qui \'{e}conomise significativement le gas car les cha\^{i}nes de caract\`{e}res ne sont pas stock\'{e}es dans le bytecode.
+
+\section{\texttt{BugBountyPlatform.sol} -- Contrat Principal}
+
+\subsection{R\^{o}le}
+C'est la passerelle unique (\textit{gateway}) de la plateforme. Toutes les interactions utilisateur passent par ce contrat. Il d\'{e}l\`{e}gue les op\'{e}rations sp\'{e}cialis\'{e}es aux sous-modules (\texttt{Escrow}, \texttt{StakeManager}, \texttt{Reputation}, \texttt{DisputeModule}).
+
+\subsection{Constructeur}
+Le constructeur (ligne 46) instancie les quatre sous-modules via \texttt{new}. Chaque module enregistre \texttt{msg.sender} (= l'adresse de \texttt{BugBountyPlatform}) comme son \texttt{platform}, garantissant que seul le contrat principal peut invoquer les fonctions sensibles.
+
+\subsection{Fonction \texttt{createBounty} (ligne 54)}
+Cr\'{e}e une nouvelle prime. Les v\'{e}rifications inconditionelles incluent~:
+\begin{itemize}
+    \item Le comit\'{e} ne doit pas \^{e}tre vide (DoS par comit\'{e} fantoche).
+    \item Le seuil K doit \^{e}tre $\leq$ \`{a} la taille du comit\'{e} (logique arithm\'{e}tique).
+    \item La deadline de soumission doit \^{e}tre dans le futur.
+    \item Les membres du comit\'{e} ne doivent pas \^{e}tre des adresses nulles ni des doublons.
+\end{itemize}
+
+\subsection{Fonction \texttt{fundBounty} (ligne 114)}
+Transfère les jetons ERC-20 \textbf{directement vers le contrat Escrow} via \texttt{safeTransferFrom}. C'est un point de conception critique~: une version ant\'{e}rieure transf\'{e}rait d'abord les fonds vers le contrat principal, puis vers l'Escrow, cr\'{e}ant un \textit{double transfert} et un risque de d\'{e}tournement.
+
+\subsection{Fonction \texttt{getRequiredStake} (ligne 124)}
+Calcule le montant du d\'{e}p\^{o}t de garantie requis en fonction de la r\'{e}putation du chercheur. La formule est~:
+$$\text{mult} = 10\,000 - (\text{score} \times \text{stakeEscalationBps})$$
+$$\text{mult} = \max(5\,000, \min(50\,000, \text{mult}))$$
+$$\text{stake} = \frac{\text{stakeAmount} \times \text{mult}}{10\,000}$$
+
+Cela signifie qu'un chercheur avec une r\'{e}putation positive paie \textbf{moins} de garantie (minimum 0.5x), tandis qu'un chercheur avec une mauvaise r\'{e}putation peut payer jusqu'\`{a} \textbf{5x} le montant de base.
+
+\subsection{Fonction \texttt{submitReport} (ligne 136)}
+C'est la fonction la plus complexe du contrat, ex\'{e}cutant pas moins de 8 v\'{e}rifications et 4 op\'{e}rations d'\'{e}criture. D\'{e}taillons~:
+
+\textbf{V\'{e}rifications (Checks)}~:
+\begin{enumerate}
+    \item Le bounty doit \^{e}tre actif (\texttt{b.active}).
+    \item La deadline de soumission ne doit pas \^{e}tre d\'{e}pass\'{e}e.
+    \item L'escrow doit contenir au moins \texttt{rewardAmount} (solvabilit\'{e}).
+    \item Les hashes structurels ne doivent pas \^{e}tre nuls (qualit\'{e} minimale).
+    \item Le nombre de rapports actifs de l'utilisateur ne doit pas d\'{e}passer \texttt{maxActiveSubmissions}.
+    \item Le rate limiter (Ring Buffer $O(1)$) doit autoriser la soumission.
+\end{enumerate}
+
+\textbf{Ring Buffer (lignes 154--162)}~:
+Au lieu d'it\'{e}rer un tableau de timestamps pour v\'{e}rifier le rate limit (ce qui serait $O(n)$ et vulner\'{e}able au DoS par gas griefing), le code utilise un tampon circulaire~:
+\begin{itemize}
+    \item Si le tableau est encore en phase de remplissage ($\text{length} < \text{maxInWindow}$), on ajoute simplement le timestamp.
+    \item Sinon, on acc\`{e}de \`{a} l'index modulo courant. Si le timestamp stock\'{e} \`{a} cet index est encore dans la fen\^{e}tre temporelle, on \texttt{revert}. Sinon, on l'\'{e}crase. L'index avance de 1 modulo \texttt{maxInWindow}.
+\end{itemize}
+
+\textbf{Hash s\'{e}par\'{e} par domaine (ligne 167)}~:
+$$\text{commitHash} = keccak256(bountyId \| msg.sender \| cidDigest \| salt \| hSteps \| hImpact \| hPoc)$$
+L'inclusion de \texttt{msg.sender} dans le hash emp\^{e}che un attaquant de copier les arguments d'un autre chercheur~: le hash r\'{e}sultant sera diff\'{e}rent car l'adresse de l'attaquant est diff\'{e}rente.
+
+\subsection{Fonction \texttt{voteReport} (ligne 198)}
+Le vote nominal en Phase 1 (avant tout litige). V\'{e}rifie que~:
+\begin{itemize}
+    \item Le votant est membre du comit\'{e}.
+    \item Le rapport est en \'{e}tat \texttt{Submitted}.
+    \item Le SLA de review n'est pas expir\'{e} (\texttt{block.timestamp <= submittedAt + reviewSLA}).
+    \item Le votant n'a pas d\'{e}j\`{a} vot\'{e}.
+\end{itemize}
+
+\subsection{Fonction \texttt{resolveDispute} (ligne 274)}
+C'est ici que le pattern \textbf{CEI (Checks-Effects-Interactions)} est le plus critique~:
+\begin{enumerate}
+    \item \textbf{Check}~: le statut doit \^{e}tre \texttt{Disputed}.
+    \item \textbf{Effect}~: \texttt{r.status = resolvedStatus} est \'{e}crit \textbf{avant} tout appel externe.
+    \item \textbf{Interaction}~: les appels \`{a} \texttt{escrow.release} et \texttt{reputation.addDisputeWon/Lost} ne peuvent pas r\'{e}entrer car l'\'{e}tat est d\'{e}j\`{a} mis \`{a} jour.
+\end{enumerate}
+
+\section{\texttt{Escrow.sol} -- Chambre de Compensation}
+
+\subsection{Architecture}
+Le contrat \texttt{Escrow} est d\'{e}lib\'{e}r\'{e}ment minimaliste (37 lignes). Il maintient un mapping \texttt{bountyId => uint256} repr\'{e}sentant la comptabilit\'{e} interne. Les tokens ERC-20 sont physiquement d\'{e}tenus par l'adresse du contrat Escrow.
+
+\subsection{Fonction \texttt{deposit}}
+Incr\'{e}mente la comptabilit\'{e} interne. \textbf{Note critique}~: cette fonction ne transf\`{e}re pas de tokens. Le transfert est effectu\'{e} par le contrat appelant (\texttt{BugBountyPlatform.fundBounty}) via \texttt{safeTransferFrom} directement vers \texttt{address(escrow)}. Cela \'{e}vite le probl\`{e}me du double transfert.
+
+\subsection{Fonction \texttt{release}}
+V\'{e}rifie la solvabilit\'{e} (\texttt{balances[bountyId] >= amount}), d\'{e}cr\'{e}mente la comptabilit\'{e}, puis transf\`{e}re les tokens via \texttt{SafeERC20.safeTransfer}. L'utilisation de \texttt{SafeERC20} est essentielle pour g\'{e}rer les tokens non-conformes comme USDT qui ne retournent pas de bool\'{e}en.
+
+\section{\texttt{StakeManager.sol} -- Gestionnaire de Garanties}
+
+\subsection{Architecture}
+Coffre-fort isol\'{e} pour les d\'{e}p\^{o}ts de garantie (stakes). Trois fonctions~:
+\begin{itemize}
+    \item \texttt{lockStake}~: transf\`{e}re les tokens du contrat principal vers le StakeManager et enregistre le montant index\'{e} par \texttt{reportId}.
+    \item \texttt{refundStake}~: rembourse le chercheur (rapport accept\'{e}). Met le solde \`{a} z\'{e}ro \textbf{avant} le transfert (CEI).
+    \item \texttt{slashStake}~: confisque le stake vers la tr\'{e}sorerie (rapport rejet\'{e}).
+\end{itemize}
+
+\section{\texttt{Reputation.sol} -- Moteur de R\'{e}putation}
+
+\subsection{Formule de Score}
+Le score est mis \`{a} jour incr\'{e}mentalement via des deltas~:
+\begin{itemize}
+    \item Rapport accept\'{e}~: $+3$ points.
+    \item Rapport rejet\'{e}~: $-2$ points.
+    \item Dispute gagn\'{e}e~: $+2$ points.
+    \item Dispute perdue~: $-3$ points.
+    \item Non-r\'{e}v\'{e}lation de vote~: $-2$ points.
+\end{itemize}
+
+\subsection{D\'{e}croissance Temporelle Exponentielle}
+La fonction \texttt{repScore} (ligne 56) calcule \`{a} la demande la d\'{e}croissance du score cach\'{e}~:
+$$\text{score}(t) = \frac{\text{score}_{cached}}{2^{\lfloor (t - t_{last}) / 90\text{j} \rfloor}}$$
+
+Le diviseur $2^n$ est impl\'{e}ment\'{e} par un d\'{e}calage de bits~: \texttt{currentScore / int64(uint64(1) << halfLives)}. Apr\`{e}s 64 demi-vies (soit $64 \times 90 = 15\,840$ jours $\approx 43$ ans), le score est forc\'{e} \`{a} z\'{e}ro pour \'{e}viter un d\'{e}passement.
+
+\section{\texttt{DisputeModule.sol} -- Module d'Arbitrage}
+
+\subsection{Machine \`{a} \'{E}tats du Litige}
+Chaque litige traverse quatre phases s\'{e}quentielles~:
+$$\text{None} \rightarrow \text{Commit} \rightarrow \text{Reveal} \rightarrow \text{Resolved}$$
+
+\subsection{Fonction \texttt{commitVote} (ligne 52)}
+V\'{e}rifie que~:
+\begin{itemize}
+    \item La phase est \texttt{Commit}.
+    \item Le timestamp est dans la fen\^{e}tre de commit.
+    \item Le membre n'a pas d\'{e}j\`{a} commis (pr\'{e}vention du double-commit).
+\end{itemize}
+Le commit hash est stock\'{e} et l'adresse du votant est ajout\'{e}e au tableau \texttt{committers}.
+
+\subsection{Fonction \texttt{revealVote} (ligne 62)}
+V\'{e}rifie que~:
+\begin{itemize}
+    \item La phase est \texttt{Reveal} (transition automatique si la deadline commit est pass\'{e}e).
+    \item Le hash $keccak256(vote \| salt)$ correspond au commitment enregistr\'{e}.
+\end{itemize}
+
+\subsection{Fonction \texttt{resolveDispute} (ligne 83)}
+D\'{e}termine le r\'{e}sultat et identifie les non-r\'{e}v\'{e}lateurs~:
+\begin{itemize}
+    \item Si $\text{acceptVotes} \geq K$~: le rapport est accept\'{e}.
+    \item Si $\text{rejectVotes} \geq K$~: le rapport est rejet\'{e}.
+    \item Sinon (ex: \'{e}galit\'{e} ou votes insuffisants)~: rejet par d\'{e}faut (anti-spam).
+\end{itemize}
+Les non-r\'{e}v\'{e}lateurs (ceux qui ont commis mais pas r\'{e}v\'{e}l\'{e}) sont retourn\'{e}s pour p\'{e}nalisation de r\'{e}putation.
+
+%==============================================================================
+% CHAPITRE 4 : AUDIT DE SECURITE
+%==============================================================================
+\chapter{Audit de S\'{e}curit\'{e} des Smart Contracts}
+
+\section{Mod\`{e}le de Menace}
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lp{10cm}@{}}
+\toprule
+\textbf{Profil d'attaquant} & \textbf{Capacit\'{e}s et objectifs} \\ \midrule
+Attaquant externe & Observe la mempool, tente de front-runner les soumissions, d\'{e}tourner les fonds d'escrow via reentrancy. \\
+Chercheur malveillant & Spam de rapports invalides, manipulation du rate limiter, abus du syst\`{e}me de dispute pour DoS. \\
+Membre du comit\'{e} malveillant & Coordination de votes pour rejeter des rapports valides, refus de r\'{e}v\'{e}ler pour bloquer la r\'{e}solution. \\
+Risques infrastructurels & Panne IPFS/Pinata, perte de cl\'{e} AES, exposition du JWT Pinata c\^{o}t\'{e} client. \\ \bottomrule
+\end{tabular}
+\caption{Mod\`{e}le de menace de la plateforme}
+\end{table}
+
+\section{Matrice de Classification des Risques}
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}llc@{}}
+\toprule
+\textbf{Vuln\'{e}rabilit\'{e}} & \textbf{S\'{e}v\'{e}rit\'{e}} & \textbf{Statut} \\ \midrule
+Front-Running / Vol MEV & \textcolor{red}{\textbf{Critique}} & \textcolor{green}{Corrig\'{e}} \\
+Insolvabilit\'{e} de l'Escrow (double transfert) & \textcolor{red}{\textbf{Critique}} & \textcolor{green}{Corrig\'{e}} \\
+Violation du pattern CEI dans \texttt{resolveDispute} & \textcolor{red}{\textbf{Critique}} & \textcolor{green}{Corrig\'{e}} \\
+DoS par boucle non born\'{e}e (rate limit) & \textcolor{orange}{\textbf{Haute}} & \textcolor{green}{Corrig\'{e}} \\
+Spam de litiges sans co\^{u}t & \textcolor{orange}{\textbf{Haute}} & \textcolor{green}{Corrig\'{e}} \\
+Vote du comit\'{e} apr\`{e}s expiration SLA & \textcolor{orange}{\textbf{Haute}} & \textcolor{green}{Corrig\'{e}} \\
+Perte de cl\'{e} AES c\^{o}t\'{e} client & \textcolor{yellow!80!black}{\textbf{Moyenne}} & \textcolor{purple}{R\'{e}siduel} \\
+Exposition JWT Pinata (NEXT\_PUBLIC) & \textcolor{gray}{\textbf{Basse}} & \textcolor{purple}{R\'{e}siduel} \\
+D\'{e}pendance au gateway Pinata & \textcolor{gray}{\textbf{Basse}} & \textcolor{purple}{R\'{e}siduel} \\ \bottomrule
+\end{tabular}
+\caption{Matrice de risques identifi\'{e}s}
+\end{table}
+
+\section{Sc\'{e}narios d'Attaque D\'{e}taill\'{e}s}
+
+\subsection{Attaque 1~: Front-Running (Vol par MEV)}
+\textbf{Contexte}~: avant la correction, un chercheur soumettait les donn\'{e}es en clair.
+
+\textbf{\'{E}tapes de l'attaque}~:
+\begin{enumerate}
+    \item Le chercheur l\'{e}gitime envoie \texttt{submitReport(bountyId, ..., cidDigest, hSteps, ...)} dans la mempool publique.
+    \item Un bot MEV capture la transaction en attente.
+    \item Le bot r\'{e}plique les m\^{e}mes arguments avec son propre \texttt{msg.sender} et un gas price plus \'{e}lev\'{e}.
+    \item Les mineurs incluent la transaction du bot en premier.
+    \item Le rapport du chercheur l\'{e}gitime est rejet\'{e} comme doublon ou le bot r\'{e}clame la r\'{e}compense.
+\end{enumerate}
+
+\textbf{Impact}~: perte de propri\'{e}t\'{e} intellectuelle et de r\'{e}compense financi\`{e}re pour le chercheur.
+
+\textbf{Correction appliqu\'{e}e}~: le \texttt{commitHash} inclut d\'{e}sormais \texttt{msg.sender} dans son calcul (ligne 167). Ainsi, m\^{e}me si un attaquant copie tous les arguments, le hash r\'{e}sultant sera diff\'{e}rent car son adresse est diff\'{e}rente. Le test \texttt{test\_FrontRunningSimulation} d\'{e}montre cette protection.
+
+\subsection{Attaque 2~: Spam de Litiges (DoS Administratif)}
+\textbf{\'{E}tapes de l'attaque}~:
+\begin{enumerate}
+    \item L'attaquant soumet un rapport invalide.
+    \item Le comit\'{e} le rejette.
+    \item L'attaquant appelle \texttt{raiseDispute} sans co\^{u}t.
+    \item R\'{e}p\'{e}tition infinie -- le comit\'{e} est paralys\'{e}.
+\end{enumerate}
+
+\textbf{Impact}~: \'{e}puisement des ressources du comit\'{e}, gel du protocole.
+
+\textbf{Correction}~: obligation de d\'{e}poser un \texttt{appealBond} (ex: 100 USDC) s\'{e}questr\'{e} dans l'Escrow. Si le chercheur perd le litige, ce bond est transf\'{e}r\'{e} \`{a} la tr\'{e}sorerie. Le test \texttt{test\_SpamDisputeAttackBlocked} v\'{e}rifie que le solde du spammeur diminue de 100~USDC.
+
+\subsection{Attaque 3~: Tentative de Drainage de l'Escrow}
+\textbf{\'{E}tapes de l'attaque}~:
+\begin{enumerate}
+    \item Un token ERC-777 malveillant est utilis\'{e} comme r\'{e}compense.
+    \item Lors de l'appel \texttt{escrow.release}, le callback \texttt{tokensReceived} de l'ERC-777 r\'{e}entre dans \texttt{resolveDispute}.
+    \item L'\'{e}tat n'ayant pas \'{e}t\'{e} mis \`{a} jour, la condition \texttt{r.status == Disputed} est toujours vraie.
+    \item L'attaquant draine les fonds en boucle.
+\end{enumerate}
+
+\textbf{Impact}~: perte totale des fonds d'escrow.
+
+\textbf{Correction}~: (1) \texttt{ReentrancyGuard.nonReentrant} bloque la r\'{e}entrance au niveau du contrat. (2) Le pattern CEI garantit que \texttt{r.status = resolvedStatus} est ex\'{e}cut\'{e} \textbf{avant} l'appel externe \`{a} \texttt{escrow.release}. Ainsi, m\^{e}me si le guard \'{e}tait absent, la v\'{e}rification \texttt{r.status != Disputed} rejetterait la seconde entr\'{e}e.
+
+\section{Cartographie OWASP Smart Contract Top 10}
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}llp{7cm}@{}}
+\toprule
+\textbf{ID} & \textbf{Cat\'{e}gorie} & \textbf{Statut et Mesure} \\ \midrule
+SC-01 & Reentrancy & Att\'{e}nu\'{e} par \texttt{ReentrancyGuard} + CEI \\
+SC-02 & Overflow/Underflow & Att\'{e}nu\'{e} nativement par Solidity 0.8.x \\
+SC-04 & Contr\^{o}le d'acc\`{e}s & Modifiers \texttt{onlyBountyOwner}, \texttt{onlyCommittee}, \texttt{onlyPlatform} \\
+SC-05 & Front-Running & Commit-Reveal + hash s\'{e}par\'{e} par domaine incluant \texttt{msg.sender} \\
+SC-06 & DoS & Ring Buffer $O(1)$ + maxActiveSubmissions \\
+SC-07 & Manipulation d'Oracle & N/A -- pas d'oracle utilis\'{e} \\
+SC-09 & Erreurs logiques & Tests fuzz + invariants dans la suite Foundry \\ \bottomrule
+\end{tabular}
+\caption{Cartographie OWASP Smart Contract Top 10}
+\end{table}
+
+%==============================================================================
+% CHAPITRE 5 : CRYPTOGRAPHIE
+%==============================================================================
+\chapter{Analyse Cryptographique}
+
+\section{Choix de l'AES-GCM}
+L'algorithme AES-GCM (Galois/Counter Mode) en 256 bits a \'{e}t\'{e} s\'{e}lectionn\'{e} pour deux raisons conjointes~:
+\begin{enumerate}
+    \item \textbf{Confidentialit\'{e}}~: le mode CTR (Counter) transforme AES en chiffrement par flux, garantissant qu'un attaquant ne peut pas d\'{e}duire le contenu du plaintext \`{a} partir du ciphertext sans la cl\'{e}.
+    \item \textbf{Int\'{e}grit\'{e} et authentification}~: le mode GCM (Galois Message Authentication Code) g\'{e}n\`{e}re un ``tag'' d'authentification de 128 bits. Toute modification du ciphertext, de l'IV, ou des donn\'{e}es AAD invalide le tag et provoque une erreur de d\'{e}chiffrement.
+\end{enumerate}
+
+\section{Vecteur d'Initialisation (IV)}
+Le code g\'{e}n\`{e}re un IV de 12 octets (96 bits) via \texttt{window.crypto.getRandomValues(new Uint8Array(12))}. Cette taille est la taille recommand\'{e}e par le NIST SP 800-38D pour AES-GCM. L'utilisation du CSPRNG du navigateur garantit l'unicit\'{e} statistique de chaque IV, condition absolue pour la s\'{e}curit\'{e} du mode CTR.
+
+\section{Additional Authenticated Data (AAD)}
+L'innovation d\'{e}fensive cl\'{e} r\'{e}side dans l'utilisation des AAD~:
+\begin{lstlisting}[language=JavaScript]
+additionalData = new TextEncoder().encode(`${chainId}:${bountyId}`);
+\end{lstlisting}
+
+Cons\'{e}quences de s\'{e}curit\'{e}~:
+\begin{itemize}
+    \item Un ciphertext g\'{e}n\'{e}r\'{e} pour le bounty 42 sur Ethereum Mainnet (chainId:1) ne peut pas \^{e}tre d\'{e}chiffr\'{e} si on tente de le r\'{e}utiliser pour le bounty 42 sur Polygon (chainId:137).
+    \item M\^{e}me en poss\'{e}dant la cl\'{e} AES, un attaquant ne peut pas transplanter un rapport d'un bounty \`{a} un autre.
+\end{itemize}
+
+\section{Risque R\'{e}siduel~: Gestion des Cl\'{e}s}
+La cl\'{e} AES est g\'{e}n\'{e}r\'{e}e, export\'{e}e en base64, et affich\'{e}e \`{a} l'utilisateur dans l'interface. Il n'existe aucun m\'{e}canisme auto\-matique de r\'{e}cup\'{e}ration. Si l'utilisateur perd cette cl\'{e}, le payload IPFS est math\'{e}matiquement ind\'{e}chiffrable. Le comit\'{e} ne pourra pas \'{e}valuer le rapport, et le d\'{e}p\^{o}t de garantie sera confisqu\'{e} (slashing) comme si le rapport \'{e}tait invalide.
+
+%==============================================================================
+% CHAPITRE 6 : ANALYSE DU FRONTEND
+%==============================================================================
+\chapter{Analyse de S\'{e}curit\'{e} du Frontend}
+
+\section{Flux de Soumission (\texttt{/submit})}
+Le fichier \texttt{submit/page.tsx} orchestre le flux suivant~:
+\begin{enumerate}
+    \item G\'{e}n\'{e}ration d'une cl\'{e} AES-256-GCM via WebCrypto.
+    \item Export de la cl\'{e} en base64 pour sauvegarde par l'utilisateur.
+    \item Chiffrement du payload JSON avec AAD.
+    \item Upload du ciphertext vers Pinata (r\'{e}cup\'{e}ration du CID).
+    \item Calcul des hashes structurels via \texttt{ethers.keccak256}.
+    \item G\'{e}n\'{e}ration d'un sel cryptographique de 32 octets.
+    \item Envoi de la transaction on-chain via Wagmi \texttt{writeContractAsync}.
+\end{enumerate}
+
+\textbf{Contr\^{o}les de qualit\'{e}}~: le frontend refuse les soumissions dont les champs textuels contiennent moins de 50 caract\`{e}res -- une mesure anti-spam c\^{o}t\'{e} client.
+
+\section{Flux du Comit\'{e} (\texttt{/committee})}
+Le panneau du comit\'{e} g\`{e}re deux phases distinctes~:
+\begin{itemize}
+    \item \textbf{Phase 1 (Vote nominal)}~: boutons Accept/Reject appelant \texttt{voteReport}.
+    \item \textbf{Phase 2 (Commit/Reveal)}~: le salt est saisi manuellement. Le client calcule le commit hash via \texttt{ethers.solidityPacked(['bool', 'string'], [vote, salt])} puis \texttt{ethers.keccak256}. Ce calcul est identique \`{a} l'impl\'{e}mentation Solidity \texttt{keccak256(abi.encodePacked(vote, salt))}.
+\end{itemize}
+
+\section{Flux de Dispute (\texttt{/dispute})}
+Trois actions~:
+\begin{itemize}
+    \item \texttt{raiseDispute}~: d\'{e}clenche le s\'{e}questre de l'appeal bond.
+    \item \texttt{triggerEscalation}~: invocable par quiconque si le SLA a expir\'{e}.
+    \item \texttt{resolveDispute}~: finalise apr\`{e}s la phase de r\'{e}v\'{e}lation.
+\end{itemize}
+
+\section{Faiblesses Identifi\'{e}es}
+\begin{itemize}
+    \item La cl\'{e} AES est affich\'{e}e en clair dans le DOM -- un screenshot ou un keylogger pourrait la capturer.
+    \item Le JWT Pinata est expos\'{e} via \texttt{NEXT\_PUBLIC\_PINATA\_JWT}, permettant \`{a} un tiers de spammer l'espace de stockage.
+    \item Aucune validation c\^{o}t\'{e} client n'emp\^{e}che l'envoi d'un \texttt{bountyId} inexistant (le revert se produira on-chain).
+\end{itemize}
+
+%==============================================================================
+% CHAPITRE 7 : STRATEGIE DE TEST
+%==============================================================================
+\chapter{Analyse de la Strat\'{e}gie de Test}
+
+\section{Tests Unitaires}
+\begin{itemize}
+    \item \texttt{test\_SubmitReportNormal}~: v\'{e}rifie qu'un rapport valid\'{e} s'\'{e}crit en \'{e}tat \texttt{Submitted}.
+    \item \texttt{test\_EscrowSolvencyRevert}~: v\'{e}rifie que la soumission \'{e}choue si l'escrow est vide.
+    \item \texttt{test\_AppealBond}~: v\'{e}rifie que l'ouverture de litige \'{e}choue sans l'allowance suffisante, puis r\'{e}ussit avec l'allowance exacte.
+    \item \texttt{test\_TriggerEscalation}~: v\'{e}rifie le revert avant l'expiration SLA et le succ\`{e}s apr\`{e}s \texttt{vm.warp}.
+    \item \texttt{test\_MaxActiveSubmissions}~: v\'{e}rifie le plafonnement par adresse.
+\end{itemize}
+
+\section{Tests de Simulation d'Attaque}
+\begin{itemize}
+    \item \texttt{test\_FrontRunningSimulation}~: deux chercheurs soumettent les m\^{e}mes arguments. Le test prouve que les commit hashes sont diff\'{e}rents gr\^{a}ce \`{a} l'inclusion de \texttt{msg.sender}.
+    \item \texttt{test\_SpamDisputeAttackBlocked}~: v\'{e}rifie que le solde du spammeur diminue de 100~USDC.
+\end{itemize}
+
+\section{Tests Fuzz}
+\begin{itemize}
+    \item \texttt{testFuzz\_VotingThresholdAndAcceptance(uint8 N, uint8 K)}~: g\'{e}n\`{e}re al\'{e}atoirement des tailles de comit\'{e} et des seuils. V\'{e}rifie que $K-1$ votes ne suffisent pas et que $K$ votes d\'{e}clenchent l'acceptation.
+    \item \texttt{testFuzz\_StakeMultiplier(int64 score)}~: v\'{e}rifie que le multiplicateur reste born\'{e} entre 0.5x et 5.0x quelle que soit la valeur du score.
+\end{itemize}
+
+\section{Test d'Int\'{e}gration Complet}
+\texttt{test\_FullCommitRevealFlow} simule le cycle de vie complet~: soumission, rejet, dispute, commit, warp temporel, reveal, r\'{e}solution. V\'{e}rifie l'\'{e}tat final \texttt{Finalized}.
+
+\section{Tests Invariants}
+\texttt{invariant\_EscrowSolvency}~: v\'{e}rifie que le solde r\'{e}el de tokens ERC-20 d\'{e}tenu par l'Escrow est \'{e}gal \`{a} la comptabilit\'{e} interne. Ce test est ex\'{e}cut\'{e} \textbf{apr\`{e}s chaque appel de fonction} par le harness Foundry.
+
+\section{Tests Manquants Sugg\'{e}r\'{e}s}
+\begin{itemize}
+    \item Test invariant avec variable fant\^{o}me (``ghost variable'') pour \texttt{StakeManager}.
+    \item Test de r\'{e}entrance avec un token ERC-777.
+    \item Test de la d\'{e}croissance de r\'{e}putation apr\`{e}s $n$ demi-vies.
+    \item Test avec plus de 50 membres de comit\'{e} pour v\'{e}rifier les limites de gas.
+\end{itemize}
+
+%==============================================================================
+% CHAPITRE 8 : PERFORMANCE ET SCALABILITE
+%==============================================================================
+\chapter{Performance et Scalabilit\'{e}}
+
+\section{Co\^{u}ts en Gas}
+\begin{itemize}
+    \item \texttt{createBounty}~: $\sim$200\,000--400\,000 gas selon la taille du comit\'{e} (\texttt{SSTORE} par membre).
+    \item \texttt{submitReport}~: $\sim$150\,000--250\,000 gas (cr\'{e}ation du Report struct + stake transfer).
+    \item \texttt{voteReport}~: $\sim$50\,000--80\,000 gas (une \'{e}criture booleen + incr\'{e}mentation du compteur).
+    \item \texttt{resolveDispute}~: variable, d\'{e}pend du nombre de non-r\'{e}v\'{e}lateurs \`{a} p\'{e}naliser.
+\end{itemize}
+
+\section{Limitations RPC}
+Le frontend interroge directement le noeud RPC pour lire l'\'{e}tat. Pour un MVP, cela est acceptable. En production avec des milliers de bounties, il faudra imp\'{e}rativement d\'{e}ployer un indexeur (The Graph) pour \'{e}viter les probl\`{e}mes de rate limiting et de latence.
+
+%==============================================================================
+% CHAPITRE 9 : RECOMMANDATIONS
+%==============================================================================
+\chapter{Recommandations}
+
+\section{Corrections Critiques}
+Aucune vuln\'{e}rabilit\'{e} critique non corrig\'{e}e n'a \'{e}t\'{e} identifi\'{e}e dans l'it\'{e}ration finale des smart contracts audit\'{e}s.
+
+\section{Am\'{e}liorations Importantes (Production)}
+\begin{enumerate}
+    \item \textbf{Indexeur \'{e}v\'{e}nementiel}~: d\'{e}ployer un subgraph The Graph pour indexer les Events et alimenter le frontend asynchronement.
+    \item \textbf{Gestion des cl\'{e}s}~: int\'{e}grer un KMS d\'{e}centralis\'{e} (Lit Protocol) ou ECIES pour partager la cl\'{e} AES avec le comit\'{e} sans intervention manuelle.
+    \item \textbf{Proxy Pinata}~: router les appels IPFS via un backend Node.js pour masquer le JWT.
+\end{enumerate}
+
+\section{Am\'{e}liorations Optionnelles}
+\begin{itemize}
+    \item Int\'{e}grer les votes EIP-712 pour permettre le vote gasless (meta-transactions).
+    \item D\'{e}ployer sur un Layer-2 (Arbitrum, Optimism) pour r\'{e}duire les co\^{u}ts de gas.
+    \item Ajouter un syst\`{e}me de d\'{e}l\'{e}gation de vote pour les comit\'{e}s inactifs.
+\end{itemize}
+
+%==============================================================================
+% CHAPITRE 10 : VERDICT FINAL
+%==============================================================================
+\chapter{Verdict Final}
+
+\section{\'{E}valuation du Niveau}
+\textbf{Niveau du projet}~: \textit{Avanc\'{e} / Qualit\'{e} Entreprise}.
+
+Ce MVP d\'{e}montre une ma\^{i}trise approfondie des concepts suivants~:
+\begin{itemize}
+    \item Architecture modulaire de smart contracts avec s\'{e}gr\'{e}gation des responsabilit\'{e}s.
+    \item Cryptographie appliqu\'{e}e (AES-GCM, AAD, hashing s\'{e}par\'{e} par domaine).
+    \item M\'{e}canismes anti-Sybil (stake escalation, ring buffer, appeal bond).
+    \item Machine \`{a} \'{e}tats finie avec transitions strictement gard\'{e}es.
+    \item Strat\'{e}gie de test couvrant unitaire, fuzz, int\'{e}gration et invariants.
+\end{itemize}
+
+\section{Forces}
+\begin{enumerate}
+    \item Le pattern CEI est appliqu\'{e} syst\'{e}matiquement, \'{e}liminant les risques de r\'{e}entrance.
+    \item La d\'{e}croissance de r\'{e}putation par bit-shifting est une solution \'{e}l\'{e}gante et gas-efficiente.
+    \item Le Ring Buffer pour le rate limiting est une optimisation algorithmique rare dans les projets PFE.
+    \item Le test \texttt{test\_FrontRunningSimulation} est une preuve formelle de la r\'{e}sistance au MEV.
+\end{enumerate}
+
+\section{Faiblesses}
+\begin{enumerate}
+    \item La gestion de la cl\'{e} AES repose enti\`{e}rement sur l'utilisateur (risque de perte).
+    \item L'absence d'indexeur limite la scalabilit\'{e} du frontend en production.
+    \item Le JWT Pinata expos\'{e} en variable d'environnement publique est un risque mineur mais r\'{e}el.
+\end{enumerate}
+
+\section{Jugement Acad\'{e}mique}
+Ce projet constitue un \textbf{excellent Projet de Fin d'\'{E}tudes} en Cybers\'{e}curit\'{e} et Blockchain. La profondeur de l'analyse de s\'{e}curit\'{e}, la rigueur des corrections appliqu\'{e}es, et la qualit\'{e} de la suite de tests d\'{e}montrent une compr\'{e}hension professionnelle des enjeux de la DeFi s\'{e}curis\'{e}e. Le projet est pr\^{e}t pour un d\'{e}ploiement sur testnet et pourrait servir de base \`{a} un produit commercial avec les am\'{e}liorations d'infrastructure recommand\'{e}es.
+
+\end{document}

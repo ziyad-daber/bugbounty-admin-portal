@@ -25,12 +25,11 @@ export async function encryptData(key: CryptoKey, data: string, chainId?: number
         additionalData = new TextEncoder().encode(`${chainId}:${bountyId}`);
     }
 
+    const params: AesGcmParams = { name: "AES-GCM", iv: iv as BufferSource };
+    if (additionalData) params.additionalData = additionalData as BufferSource;
+
     const encryptedContent = await window.crypto.subtle.encrypt(
-        {
-            name: "AES-GCM",
-            iv: iv,
-            additionalData: additionalData
-        },
+        params,
         key,
         encodedData
     );
@@ -54,12 +53,11 @@ export async function decryptData(key: CryptoKey, ciphertextBase64: string, ivBa
         additionalData = new TextEncoder().encode(`${chainId}:${bountyId}`);
     }
 
+    const decParams: AesGcmParams = { name: "AES-GCM", iv: new Uint8Array(iv) as BufferSource };
+    if (additionalData) decParams.additionalData = additionalData as BufferSource;
+
     const decryptedContent = await window.crypto.subtle.decrypt(
-        {
-            name: "AES-GCM",
-            iv: new Uint8Array(iv),
-            additionalData: additionalData
-        },
+        decParams,
         key,
         new Uint8Array(ciphertext)
     );
