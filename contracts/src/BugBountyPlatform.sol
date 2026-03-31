@@ -22,7 +22,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
     Reputation public reputation;
     DisputeModule public disputeModule;
 
-    mapping(uint256 => Bounty) public bounties;
+    mapping(uint256 => Bounty) private _bounties;
     mapping(uint256 => mapping(address => bool)) public isCommitteeMember;
     mapping(uint256 => mapping(address => uint256)) public activeReports;
     mapping(address => mapping(uint256 => uint256)) public userSubmissionIdx;
@@ -34,7 +34,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
     mapping(address => mapping(uint256 => uint64[])) public userSubmissions;
 
     modifier onlyBountyOwner(uint256 bountyId) {
-        if (msg.sender != bounties[bountyId].owner) revert NotBountyOwner();
+        if (msg.sender != _bounties[bountyId].owner) revert NotBountyOwner();
         _;
     }
 
@@ -73,7 +73,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
 
         bountyId = bountyCount++;
 
-        Bounty storage b = bounties[bountyId];
+        Bounty storage b = _bounties[bountyId];
         b.owner = msg.sender;
         b.submissionDeadline = submissionDeadline;
         b.reviewSLA = reviewSLA;
@@ -112,7 +112,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
     }
 
     function fundBounty(uint256 bountyId, uint256 amount) external onlyBountyOwner(bountyId) {
-        Bounty storage b = bounties[bountyId];
+        Bounty storage b = _bounties[bountyId];
         b.token.safeTransferFrom(msg.sender, address(escrow), amount);
         escrow.deposit(bountyId, amount);
         
@@ -122,7 +122,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
     }
 
     function getRequiredStake(uint256 bountyId, address user) public view returns (uint256) {
-        Bounty storage b = bounties[bountyId];
+        Bounty storage b = _bounties[bountyId];
         if (b.stakeAmount == 0) return 0;
         
         int64 score = reputation.repScore(user);
@@ -141,7 +141,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
         bytes32 hImpact,
         bytes32 hPoc
     ) external nonReentrant returns (uint256 reportId) {
-        Bounty storage b = bounties[bountyId];
+        Bounty storage b = _bounties[bountyId];
 
         if (!b.active) revert BountyInactive();
         if (block.timestamp > b.submissionDeadline) revert SubmissionClosed();
@@ -197,7 +197,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
 
     function voteReport(uint256 bountyId, uint256 reportId, bool accepted) external nonReentrant onlyCommittee(bountyId) {
         Report storage r = reports[bountyId][reportId];
-        Bounty storage b = bounties[bountyId];
+        Bounty storage b = _bounties[bountyId];
 
         if (r.researcher == address(0)) revert InvalidReport();
         if (r.status != ReportStatus.Submitted) revert ReportNotSubmittable();
@@ -227,7 +227,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
     
     function raiseDispute(uint256 bountyId, uint256 reportId) external nonReentrant {
         Report storage r = reports[bountyId][reportId];
-        Bounty storage b = bounties[bountyId];
+        Bounty storage b = _bounties[bountyId];
         if (msg.sender != r.researcher) revert NotAuthorized();
         if (r.status != ReportStatus.Submitted && r.status != ReportStatus.Rejected) revert ReportNotDisputable();
         
@@ -247,7 +247,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
 
     function triggerEscalation(uint256 bountyId, uint256 reportId) external nonReentrant {
         Report storage r = reports[bountyId][reportId];
-        Bounty storage b = bounties[bountyId];
+        Bounty storage b = _bounties[bountyId];
 
         if (r.status != ReportStatus.Submitted) revert ReportNotDisputable();
         if (block.timestamp <= r.submittedAt + b.reviewSLA) revert SLANotExpired(); 
@@ -273,7 +273,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
 
     function resolveDispute(uint256 bountyId, uint256 reportId) external nonReentrant {
         Report storage r = reports[bountyId][reportId];
-        Bounty storage b = bounties[bountyId];
+        Bounty storage b = _bounties[bountyId];
         if (r.status != ReportStatus.Disputed) revert ReportNotDisputable();
 
         (ReportStatus resolvedStatus, address[] memory nonRevealers) = disputeModule.resolveDispute(reportId, b.thresholdK);
@@ -310,7 +310,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
 
     function _finalize(uint256 bountyId, uint256 reportId, ReportStatus finalStatus) internal {
         Report storage r = reports[bountyId][reportId];
-        Bounty storage b = bounties[bountyId];
+        Bounty storage b = _bounties[bountyId];
 
         if (r.paid) revert AlreadyPaid();
 
@@ -340,5 +340,53 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
 
             emit ReportFinalized(bountyId, reportId, ReportStatus.Rejected);
         }
+    }
+
+    function getBountyCore(uint256 bountyId) external view returns (
+        address owner,
+        IERC20 token,
+        uint256 rewardAmount,
+        uint256 stakeAmount,
+        uint256 appealBond,
+        uint64 submissionDeadline,
+        uint32 reviewSLA,
+        uint32 rateLimitWindow,
+        uint16 stakeEscalationBps,
+        uint8 maxInWindow
+    ) {
+        Bounty storage b = _bounties[bountyId];
+        return (
+            b.owner,
+            b.token,
+            b.rewardAmount,
+            b.stakeAmount,
+            b.appealBond,
+            b.submissionDeadline,
+            b.reviewSLA,
+            b.rateLimitWindow,
+            b.stakeEscalationBps,
+            b.maxInWindow
+        );
+    }
+
+    function getBountyState(uint256 bountyId) external view returns (
+        uint8 maxActiveSubmissions,
+        uint8 committeeSize,
+        uint8 thresholdK,
+        uint32 disputeCommitSeconds,
+        uint32 disputeRevealSeconds,
+        bool active,
+        uint256 escrowBalance
+    ) {
+        Bounty storage b = _bounties[bountyId];
+        return (
+            b.maxActiveSubmissions,
+            b.committeeSize,
+            b.thresholdK,
+            b.disputeCommitSeconds,
+            b.disputeRevealSeconds,
+            b.active,
+            b.escrowBalance
+        );
     }
 }

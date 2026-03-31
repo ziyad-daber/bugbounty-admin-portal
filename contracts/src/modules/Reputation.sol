@@ -65,7 +65,7 @@ contract Reputation {
                 if (halfLives >= 64) {
                     currentScore = 0;
                 } else {
-                    currentScore = currentScore / int64(uint64(1) << halfLives);
+                    currentScore = currentScore / int64(uint64(1) << uint64(halfLives));
                 }
             }
         }

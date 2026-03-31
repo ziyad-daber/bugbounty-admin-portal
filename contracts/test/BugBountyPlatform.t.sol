@@ -274,7 +274,7 @@ contract BugBountyPlatformTest is Test {
 
     function testFuzz_StakeMultiplier(int64 score) public {
         // Bound score to realistic values
-        score = int64(bound(uint64(uint256(int256(score))), uint64(uint256(int256(-1000))), uint64(uint256(int256(1000)))));
+        score = int64(bound(int256(score), int256(-1000), int256(1000)));
         
         // Force score directly into Reputation contract if possible, but since we can't easily prank the internal storage, 
         // we test the math logic inside getRequiredStake manually if doing a real unit test. 
@@ -348,7 +348,7 @@ contract BugBountyPlatformTest is Test {
     // --- INVARIANT TESTS ---
 
     function invariant_EscrowSolvency() public {
-        (,,,,,,,,,,,,,uint256 escrowBalance,) = platform.bounties(bountyId);
+        (,,,,,,uint256 escrowBalance) = platform.getBountyState(bountyId);
         assertEq(token.balanceOf(address(platform.escrow())), escrowBalance);
     }
 

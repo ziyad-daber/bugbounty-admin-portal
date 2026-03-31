@@ -11,6 +11,7 @@ const navLinks = [
   { href: '/submit', label: 'Submit Report' },
   { href: '/committee', label: 'Committee' },
   { href: '/dispute', label: 'Disputes' },
+  { href: '/admin', label: 'Admin Panel' },
 ];
 
 export function Navbar() {

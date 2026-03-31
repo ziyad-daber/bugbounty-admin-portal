@@ -123,26 +123,41 @@ export const BUG_BOUNTY_PLATFORM_ABI = [
   },
   {
     "inputs": [{"name": "bountyId", "type": "uint256"}],
-    "name": "bounties",
+    "name": "getBountyCore",
     "outputs": [
       {"name": "owner", "type": "address"},
+      {"name": "token", "type": "address"},
+      {"name": "rewardAmount", "type": "uint256"},
+      {"name": "stakeAmount", "type": "uint256"},
+      {"name": "appealBond", "type": "uint256"},
       {"name": "submissionDeadline", "type": "uint64"},
       {"name": "reviewSLA", "type": "uint32"},
-      {"name": "token", "type": "address"},
       {"name": "rateLimitWindow", "type": "uint32"},
       {"name": "stakeEscalationBps", "type": "uint16"},
-      {"name": "maxInWindow", "type": "uint8"},
+      {"name": "maxInWindow", "type": "uint8"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"name": "bountyId", "type": "uint256"}],
+    "name": "getBountyState",
+    "outputs": [
       {"name": "maxActiveSubmissions", "type": "uint8"},
       {"name": "committeeSize", "type": "uint8"},
       {"name": "thresholdK", "type": "uint8"},
       {"name": "disputeCommitSeconds", "type": "uint32"},
       {"name": "disputeRevealSeconds", "type": "uint32"},
       {"name": "active", "type": "bool"},
-      {"name": "rewardAmount", "type": "uint256"},
-      {"name": "stakeAmount", "type": "uint256"},
-      {"name": "escrowBalance", "type": "uint256"},
-      {"name": "appealBond", "type": "uint256"}
+      {"name": "escrowBalance", "type": "uint256"}
     ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [{"name": "bountyId", "type": "uint256"}],
+    "name": "reportCount",
+    "outputs": [{"name": "", "type": "uint256"}],
     "stateMutability": "view",
     "type": "function"
   },
