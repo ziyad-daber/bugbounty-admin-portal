@@ -1,6 +1,6 @@
 'use client'
 import Link from 'next/link';
-import { useReadContract } from 'wagmi';
+import { useReadContract, useReadContracts } from 'wagmi';
 import { BUG_BOUNTY_PLATFORM_ABI, CONTRACT_ADDRESS } from '@/services/contracts';
 import { StatCard } from '@/components/StatCard';
 import { ActivityFeed } from '@/components/ActivityFeed';
@@ -18,8 +18,54 @@ export default function DashboardPage() {
   const { data: bountyCount } = useReadContract({
     address: CONTRACT_ADDRESS as `0x${string}`,
     abi: BUG_BOUNTY_PLATFORM_ABI as any,
-    functionName: 'bountyCount'
+    functionName: 'bountyCount',
+    query: { refetchInterval: 10000 }
   });
+
+  const bountyCountNum = Number(bountyCount || 0);
+
+  // Fetch all bounties
+  const bountyCalls = Array.from({ length: bountyCountNum }).map((_, i) => ({
+    address: CONTRACT_ADDRESS as `0x${string}`,
+    abi: BUG_BOUNTY_PLATFORM_ABI as any,
+    functionName: 'getBountyCore',
+    args: [i],
+  }));
+
+  const { data: bountiesData } = useReadContracts({
+    contracts: bountyCalls,
+    query: { refetchInterval: 10000 },
+  });
+
+  // Calculate total rewards locked (sum of rewardAmount)
+  const totalRewardsUsdc = (bountiesData || []).reduce((acc, res) => {
+    if (res.status === 'success' && res.result) {
+      // result is an array: [owner, token, rewardAmount, ...]
+      const reward = Number((res.result as any[])[2]) / 1000000;
+      return acc + reward;
+    }
+    return acc;
+  }, 0);
+
+  // Fetch all report counts
+  const reportCountCalls = Array.from({ length: bountyCountNum }).map((_, i) => ({
+    address: CONTRACT_ADDRESS as `0x${string}`,
+    abi: BUG_BOUNTY_PLATFORM_ABI as any,
+    functionName: 'reportCount',
+    args: [i],
+  }));
+
+  const { data: reportCountsData } = useReadContracts({
+    contracts: reportCountCalls,
+    query: { refetchInterval: 10000 },
+  });
+
+  const totalReportsSubmitted = (reportCountsData || []).reduce((acc, res) => {
+    if (res.status === 'success' && res.result) {
+      return acc + Number(res.result);
+    }
+    return acc;
+  }, 0);
 
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
@@ -52,10 +98,10 @@ export default function DashboardPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 space-y-12">
         {/* Stats */}
         <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 -mt-4">
-          <StatCard icon={Target} label="Active Bounties" value={bountyCount ? bountyCount.toString() : '—'} trend="+3 this week" color="brand" />
-          <StatCard icon={Coins} label="Total Rewards Locked" value="47,500 USDC" trend="+12%" color="emerald" />
-          <StatCard icon={FileText} label="Reports Submitted" value="128" color="amber" />
-          <StatCard icon={Scale} label="Disputes Resolved" value="14" color="rose" />
+          <StatCard icon={Target} label="Active Bounties" value={bountyCount ? bountyCount.toString() : '0'} trend="Live On-Chain" color="brand" />
+          <StatCard icon={Coins} label="Total Rewards Locked" value={`${totalRewardsUsdc.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC`} trend="Secured" color="emerald" />
+          <StatCard icon={FileText} label="Reports Submitted" value={totalReportsSubmitted.toString()} color="amber" />
+          <StatCard icon={Scale} label="Disputes Resolved" value="—" color="rose" />
         </section>
 
         {/* Quick Actions + Activity */}

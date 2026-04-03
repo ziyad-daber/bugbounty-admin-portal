@@ -7,6 +7,20 @@ export function WalletConnect() {
   const { address, isConnected } = useAccount();
   const { connectors, connect } = useConnect();
   const { disconnect } = useDisconnect();
+  const [isMounted, setIsMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  if (!isMounted) {
+    return (
+      <button disabled className="btn-primary flex items-center gap-2 text-sm !px-4 !py-2 opacity-70">
+        <Wallet className="w-4 h-4" />
+        Loading...
+      </button>
+    );
+  }
 
   if (isConnected) {
     return (

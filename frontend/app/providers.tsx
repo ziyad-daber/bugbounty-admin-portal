@@ -3,15 +3,16 @@
 import * as React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { WagmiProvider, createConfig, http } from 'wagmi'
-import { arbitrumSepolia } from 'wagmi/chains'
+import { arbitrumSepolia, foundry } from 'wagmi/chains'
 import { injected } from 'wagmi/connectors'
 
 export const config = createConfig({
-  chains: [arbitrumSepolia],
+  chains: [foundry, arbitrumSepolia],
   connectors: [
     injected(),
   ],
   transports: {
+    [foundry.id]: http(),
     [arbitrumSepolia.id]: http(),
   },
 })

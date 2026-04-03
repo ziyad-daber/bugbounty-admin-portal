@@ -31,8 +31,8 @@ export async function uploadToIPFS(data: any): Promise<string> {
 
 export async function fetchFromIPFS(cid: string): Promise<any> {
     try {
-        // Use a public gateway for fetching
-        const res = await fetch(`https://gateway.pinata.cloud/ipfs/${cid}`);
+        // Use dedicated gateway for fetching
+        const res = await fetch(`https://indigo-useful-mite-186.mypinata.cloud/ipfs/${cid}`);
         if (!res.ok) throw new Error("IPFS fetch failed");
         return await res.json();
     } catch (error) {

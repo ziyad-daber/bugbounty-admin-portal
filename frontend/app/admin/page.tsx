@@ -49,7 +49,7 @@ function AdminDashboard() {
       }
       return null;
     })
-    .filter(b => b !== null && b.core.owner.toLowerCase() === address?.toLowerCase()) || [];
+    .filter(b => b !== null && String(b.core[0]).toLowerCase() === String(address).toLowerCase()) || [];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 animate-fade-in">
@@ -100,7 +100,7 @@ function AdminDashboard() {
                     <ChevronRight className={`w-5 h-5 ${selectedBountyId === b.id ? 'text-brand-500' : 'text-gray-400'}`} />
                   </div>
                   <div className="mt-2 text-sm text-gray-500 truncate font-mono">
-                    Token: {b.core.token}
+                    Token: {String(b.core[1])}
                   </div>
                 </div>
               ))}
@@ -177,7 +177,7 @@ function ReportsPanel({ bountyId }: { bountyId: number }) {
       ) : (
         <div className="space-y-4">
           {reports.map((r) => {
-             const statusStr = STATUS_MAP[r.data.status] || 'Unknown';
+             const statusStr = STATUS_MAP[Number(r.data[3])] || 'Unknown';
              let StatusIcon = Clock;
              let statusColor = 'text-gray-500 bg-gray-50 dark:bg-slate-800';
              
@@ -197,19 +197,19 @@ function ReportsPanel({ bountyId }: { bountyId: number }) {
                     </span>
                   </div>
                   <span className="text-xs text-gray-400">
-                    {new Date(Number(r.data.submittedAt) * 1000).toLocaleString()}
+                    {new Date(Number(r.data[1]) * 1000).toLocaleString()}
                   </span>
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 text-sm">
                   <div>
                     <span className="block text-gray-500 dark:text-gray-400 mb-1">Researcher</span>
-                    <span className="font-mono text-gray-900 dark:text-gray-200 break-all">{r.data.researcher}</span>
+                    <span className="font-mono text-gray-900 dark:text-gray-200 break-all">{String(r.data[0])}</span>
                   </div>
                   <div>
                     <span className="block text-gray-500 dark:text-gray-400 mb-1">Commit Hash</span>
-                    <span className="font-mono text-gray-900 dark:text-gray-200 break-all" title={r.data.commitHash}>
-                      {r.data.commitHash.slice(0, 14)}...
+                    <span className="font-mono text-gray-900 dark:text-gray-200 break-all" title={String(r.data[6])}>
+                      {String(r.data[6]).slice(0, 14)}...
                     </span>
                   </div>
                 </div>
