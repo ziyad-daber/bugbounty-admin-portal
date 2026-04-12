@@ -20,7 +20,7 @@ contract BugBountyPlatformTest is Test {
 
     function setUp() public {
         token = new MockUSDC(address(this));
-        platform = new BugBountyPlatform(address(99)); // treasury
+        platform = new BugBountyPlatform(address(99), address(88)); // treasury, valid forwarder
 
         address[] memory committee = new address[](3);
         committee[0] = committee1;

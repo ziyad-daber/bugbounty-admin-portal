@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 
 import "./interfaces/IBugBounty.sol";
 import "./modules/Escrow.sol";
@@ -11,7 +12,7 @@ import "./modules/StakeManager.sol";
 import "./modules/Reputation.sol";
 import "./modules/DisputeModule.sol";
 
-contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
+contract BugBountyPlatform is IBugBounty, ReentrancyGuard, ERC2771Context {
     using SafeERC20 for IERC20;
 
     uint256 public bountyCount;
@@ -34,16 +35,16 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
     mapping(address => mapping(uint256 => uint64[])) public userSubmissions;
 
     modifier onlyBountyOwner(uint256 bountyId) {
-        if (msg.sender != _bounties[bountyId].owner) revert NotBountyOwner();
+        if (_msgSender() != _bounties[bountyId].owner) revert NotBountyOwner();
         _;
     }
 
     modifier onlyCommittee(uint256 bountyId) {
-        if (!isCommitteeMember[bountyId][msg.sender]) revert NotCommitteeMember();
+        if (!isCommitteeMember[bountyId][_msgSender()]) revert NotCommitteeMember();
         _;
     }
 
-    constructor(address _treasury) {
+    constructor(address _treasury, address _trustedForwarder) ERC2771Context(_trustedForwarder) {
         treasury = _treasury;
         escrow = new Escrow();
         stakeManager = new StakeManager(_treasury);
@@ -74,7 +75,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
         bountyId = bountyCount++;
 
         Bounty storage b = _bounties[bountyId];
-        b.owner = msg.sender;
+        b.owner = _msgSender();
         b.submissionDeadline = submissionDeadline;
         b.reviewSLA = reviewSLA;
         b.token = IERC20(token);
@@ -100,7 +101,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
 
         emit BountyCreated(
             bountyId,
-            msg.sender,
+            _msgSender(),
             token,
             rewardAmount,
             stakeAmount,
@@ -113,7 +114,7 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
 
     function fundBounty(uint256 bountyId, uint256 amount) external onlyBountyOwner(bountyId) {
         Bounty storage b = _bounties[bountyId];
-        b.token.safeTransferFrom(msg.sender, address(escrow), amount);
+        b.token.safeTransferFrom(_msgSender(), address(escrow), amount);
         escrow.deposit(bountyId, amount);
         
         b.escrowBalance += amount;
@@ -148,31 +149,31 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
         if (b.escrowBalance < b.rewardAmount) revert InsufficientEscrow(); // Solvency logic
         if (hSteps == bytes32(0) || hImpact == bytes32(0) || hPoc == bytes32(0)) revert InvalidReport(); // Structure hash logic
 
-        if (activeReports[bountyId][msg.sender] >= b.maxActiveSubmissions) revert RateLimitExceeded();
+        if (activeReports[bountyId][_msgSender()] >= b.maxActiveSubmissions) revert RateLimitExceeded();
 
         // Anti-spam: Rate limiting check using Ring Buffer
-        uint64[] storage subs = userSubmissions[msg.sender][bountyId];
+        uint64[] storage subs = userSubmissions[_msgSender()][bountyId];
         if (subs.length < b.maxInWindow) {
             subs.push(uint64(block.timestamp));
         } else {
-            uint256 idx = userSubmissionIdx[msg.sender][bountyId] % (b.maxInWindow > 0 ? b.maxInWindow : 1);
+            uint256 idx = userSubmissionIdx[_msgSender()][bountyId] % (b.maxInWindow > 0 ? b.maxInWindow : 1);
             if (subs[idx] + b.rateLimitWindow > block.timestamp) revert RateLimitExceeded();
             subs[idx] = uint64(block.timestamp);
-            userSubmissionIdx[msg.sender][bountyId] = (idx + 1) % b.maxInWindow;
+            userSubmissionIdx[_msgSender()][bountyId] = (idx + 1) % b.maxInWindow;
         }
 
-        activeReports[bountyId][msg.sender]++;
+        activeReports[bountyId][_msgSender()]++;
 
         // Security: Secure domain-separated commit hash
-        bytes32 commitHash = keccak256(abi.encodePacked(bountyId, msg.sender, cidDigest, salt, hSteps, hImpact, hPoc));
+        bytes32 commitHash = keccak256(abi.encodePacked(bountyId, _msgSender(), cidDigest, salt, hSteps, hImpact, hPoc));
 
         // Security: Escalating stake via Reputation
-        uint256 actualStake = getRequiredStake(bountyId, msg.sender);
+        uint256 actualStake = getRequiredStake(bountyId, _msgSender());
 
         reportId = reportCount[bountyId]++;
 
         reports[bountyId][reportId] = Report({
-            researcher: msg.sender,
+            researcher: _msgSender(),
             submittedAt: uint64(block.timestamp),
             paid: false,
             status: ReportStatus.Submitted,
@@ -187,12 +188,12 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
         });
 
         if (actualStake > 0) {
-            b.token.safeTransferFrom(msg.sender, address(this), actualStake);
+            b.token.safeTransferFrom(_msgSender(), address(this), actualStake);
             b.token.safeIncreaseAllowance(address(stakeManager), actualStake);
             stakeManager.lockStake(reportId, b.token, actualStake, address(this));
         }
 
-        emit ReportCommitted(bountyId, reportId, msg.sender, commitHash, cidDigest, hSteps, hImpact, hPoc, actualStake);
+        emit ReportCommitted(bountyId, reportId, _msgSender(), commitHash, cidDigest, hSteps, hImpact, hPoc, actualStake);
     }
 
     function voteReport(uint256 bountyId, uint256 reportId, bool accepted) external nonReentrant onlyCommittee(bountyId) {
@@ -202,9 +203,9 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
         if (r.researcher == address(0)) revert InvalidReport();
         if (r.status != ReportStatus.Submitted) revert ReportNotSubmittable();
         if (block.timestamp > r.submittedAt + b.reviewSLA) revert DeadlinePassed();
-        if (hasVoted[bountyId][reportId][msg.sender]) revert AlreadyVoted();
+        if (hasVoted[bountyId][reportId][_msgSender()]) revert AlreadyVoted();
 
-        hasVoted[bountyId][reportId][msg.sender] = true;
+        hasVoted[bountyId][reportId][_msgSender()] = true;
 
         if (accepted) {
             r.acceptVotes += 1;
@@ -222,18 +223,18 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
             }
         }
 
-        emit ReportVoted(bountyId, reportId, msg.sender, accepted);
+        emit ReportVoted(bountyId, reportId, _msgSender(), accepted);
     }
     
     function raiseDispute(uint256 bountyId, uint256 reportId) external nonReentrant {
         Report storage r = reports[bountyId][reportId];
         Bounty storage b = _bounties[bountyId];
-        if (msg.sender != r.researcher) revert NotAuthorized();
+        if (_msgSender() != r.researcher) revert NotAuthorized();
         if (r.status != ReportStatus.Submitted && r.status != ReportStatus.Rejected) revert ReportNotDisputable();
         
         // Anti-spam: Require appeal bond
         if (b.appealBond > 0) {
-            b.token.safeTransferFrom(msg.sender, address(escrow), b.appealBond);
+            b.token.safeTransferFrom(_msgSender(), address(escrow), b.appealBond);
             escrow.deposit(bountyId, b.appealBond);
         }
 
@@ -260,15 +261,15 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard {
     function commitVote(uint256 bountyId, uint256 reportId, bytes32 commitHash) external nonReentrant onlyCommittee(bountyId) {
         Report storage r = reports[bountyId][reportId];
         if (r.status != ReportStatus.Disputed) revert ReportNotDisputable();
-        disputeModule.commitVote(reportId, msg.sender, commitHash);
-        emit VoteCommitted(bountyId, reportId, msg.sender);
+        disputeModule.commitVote(reportId, _msgSender(), commitHash);
+        emit VoteCommitted(bountyId, reportId, _msgSender());
     }
 
     function revealVote(uint256 bountyId, uint256 reportId, bool vote, string calldata salt) external nonReentrant onlyCommittee(bountyId) {
         Report storage r = reports[bountyId][reportId];
         if (r.status != ReportStatus.Disputed) revert ReportNotDisputable();
-        disputeModule.revealVote(reportId, msg.sender, vote, salt);
-        emit VoteRevealed(bountyId, reportId, msg.sender, vote);
+        disputeModule.revealVote(reportId, _msgSender(), vote, salt);
+        emit VoteRevealed(bountyId, reportId, _msgSender(), vote);
     }
 
     function resolveDispute(uint256 bountyId, uint256 reportId) external nonReentrant {
