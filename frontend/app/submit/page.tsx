@@ -1,6 +1,6 @@
 'use client'
 import React, { useState } from 'react';
-import { useAccount, useWriteContract, useReadContract, useReadContracts, useChainId } from 'wagmi';
+import { useAccount, useWriteContract, useReadContract, useReadContracts, useChainId, useSwitchChain } from 'wagmi';
 import { erc20Abi } from 'viem';
 import { generateKey, encryptData, exportKey } from '@/services/encryption';
 import { uploadToIPFS } from '@/services/ipfs';
@@ -15,9 +15,11 @@ const steps = [
 ];
 
 export default function SubmitReportPage() {
-  const { isConnected } = useAccount();
-  const chainId = useChainId();
+  const { isConnected, chainId } = useAccount();
+  const { switchChain } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
+
+  const isOnWrongNetwork = isConnected && chainId !== 421614;
 
   const { data: bountyCountStr } = useReadContract({
     address: CONTRACT_ADDRESS as `0x${string}`,
@@ -83,6 +85,7 @@ export default function SubmitReportPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isConnected) return alert('Please connect your wallet first');
+    if (chainId !== 421614) return alert('Please switch to Arbitrum Sepolia network.');
     if (!hasSavedKey) return alert('You must check the key confirmation box.');
     if (stepsText.length < 50 || impact.length < 50 || poc.length < 50) return alert('Content too short. Provide rigorous detail.');
     if (!bountyCore) return alert('Could not fetch bounty details. Is the ID correct?');
@@ -149,6 +152,48 @@ export default function SubmitReportPage() {
 
   return (
     <div className="animate-fade-in max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      {/* Network Warning */}
+      {isOnWrongNetwork && (
+        <div className="glass-card p-4 mb-6 border-amber-200 dark:border-amber-500/20 bg-amber-50/50 dark:bg-amber-500/5">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="font-semibold text-amber-800 dark:text-amber-300">Wrong Network Detected</p>
+              <p className="text-sm text-amber-700/80 dark:text-amber-400/80 mt-1">
+                You need to be on <strong>Arbitrum Sepolia</strong> to submit reports. Current chain ID: {chainId}
+              </p>
+              <button
+                onClick={() => switchChain({ chainId: 421614 })}
+                className="mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Switch to Arbitrum Sepolia
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Faucet Link */}
+      {isConnected && chainId === 421614 && (
+        <div className="glass-card p-4 mb-6 border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              <div>
+                <p className="font-semibold text-emerald-800 dark:text-emerald-300 text-sm">Need test tokens?</p>
+                <p className="text-xs text-emerald-700/70 dark:text-emerald-400/70">Get free USDC and ETH on Arbitrum Sepolia</p>
+              </div>
+            </div>
+            <a
+              href="/faucet"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              Open Faucet
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="text-center mb-8">
         <div className="inline-flex p-3 rounded-2xl bg-brand-50 dark:bg-brand-500/10 mb-4">

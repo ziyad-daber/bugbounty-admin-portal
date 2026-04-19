@@ -122,7 +122,7 @@ contract BugBountyPlatformTest is Test {
         vm.stopPrank();
 
         // Should revert because SLA hasn't passed
-        vm.expectRevert(IBugBounty.DeadlinePassed.selector);
+        vm.expectRevert(IBugBounty.SLANotExpired.selector);
         platform.triggerEscalation(bountyId, reportId);
 
         vm.warp(block.timestamp + 4 days); // Past 3 days SLA

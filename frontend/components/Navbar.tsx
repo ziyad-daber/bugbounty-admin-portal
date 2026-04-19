@@ -9,6 +9,7 @@ import { Shield, Sun, Moon, Menu, X } from 'lucide-react';
 const navLinks = [
   { href: '/', label: 'Dashboard' },
   { href: '/submit', label: 'Submit Report' },
+  { href: '/faucet', label: 'Faucet' },
   { href: '/committee', label: 'Committee' },
   { href: '/dispute', label: 'Disputes' },
   { href: '/admin', label: 'Admin Panel' },
