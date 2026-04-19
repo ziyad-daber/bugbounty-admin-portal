@@ -1,332 +1,347 @@
 'use client'
-import React, { useState } from 'react';
-import { useAccount, useWriteContract, useReadContract, useReadContracts, useChainId, useSwitchChain } from 'wagmi';
-import { erc20Abi } from 'viem';
-import { generateKey, encryptData, exportKey } from '@/services/encryption';
-import { uploadToIPFS } from '@/services/ipfs';
+import React, { useState, useEffect } from 'react';
+import { useAccount, useWriteContract, useReadContract, useReadContracts, useWaitForTransactionReceipt } from 'wagmi';
 import { BUG_BOUNTY_PLATFORM_ABI, CONTRACT_ADDRESS } from '@/services/contracts';
-import { ethers } from 'ethers';
-import { Lock, Upload, Send, CheckCircle, Shield, AlertCircle, Key, Target } from 'lucide-react';
+import { getTokenByAddress, formatTokenAmount } from '@/services/tokens';
+import { prepareSubmission } from '@/services/ipfs';
+import { 
+  Send, Shield, AlertCircle, CheckCircle, Info, Lock, 
+  Terminal, ArrowRight, Zap, Target, Coins, Fingerprint, Loader2
+} from 'lucide-react';
+import Link from 'next/link';
 
-const steps = [
-  { icon: Lock, label: 'Encrypt' },
-  { icon: Upload, label: 'Upload IPFS' },
-  { icon: Send, label: 'Submit On-Chain' },
-];
+const ERC20_ABI = [
+  {"inputs":[{"name":"spender","type":"address"},{"name":"amount","type":"uint256"}],"name":"approve","outputs":[{"name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"name":"owner","type":"address"},{"name":"spender","type":"address"}],"name":"allowance","outputs":[{"name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
+] as const;
 
 export default function SubmitReportPage() {
-  const { isConnected, chainId } = useAccount();
-  const { switchChain } = useSwitchChain();
-  const { writeContractAsync } = useWriteContract();
-
-  const isOnWrongNetwork = isConnected && chainId !== 421614;
-
-  const { data: bountyCountStr } = useReadContract({
-    address: CONTRACT_ADDRESS as `0x${string}`,
-    abi: BUG_BOUNTY_PLATFORM_ABI as any,
-    functionName: 'bountyCount'
-  });
+  const { address, isConnected, chainId } = useAccount();
+  const [bountyId, setBountyId] = useState<number>(0);
   
-  const bountyCalls = Array.from({ length: Number(bountyCountStr || 0) }).map((_, i) => ({
-    address: CONTRACT_ADDRESS as `0x${string}`,
-    abi: BUG_BOUNTY_PLATFORM_ABI as any,
-    functionName: 'getBountyCore',
-    args: [i],
-  }));
-  
-  const { data: activeBountiesData } = useReadContracts({ contracts: bountyCalls });
-  const activeBounties = activeBountiesData
-    ?.map((res, i) => res.status === 'success' && res.result ? { id: i, core: res.result as any[] } : null)
-    .filter(b => b !== null) || [];
-
-  const [bountyIdStr, setBountyIdStr] = useState('0');
-  const [title, setTitle] = useState('');
-  const [stepsText, setStepsText] = useState('');
+  // Form State
+  const [steps, setSteps] = useState('');
   const [impact, setImpact] = useState('');
   const [poc, setPoc] = useState('');
+  const [severity, setSeverity] = useState<'critical' | 'high' | 'medium' | 'low'>('medium');
 
-  const { data: bountyCore } = useReadContract({
-    address: CONTRACT_ADDRESS as `0x${string}`,
-    abi: BUG_BOUNTY_PLATFORM_ABI as any,
+  // Logic State
+  const [status, setStatus] = useState('');
+  const [txHash, setTxHash] = useState<`0x${string}` | undefined>(undefined);
+  const [isApproving, setIsApproving] = useState(false);
+
+  const { writeContractAsync } = useWriteContract();
+  const { isSuccess: isConfirmed, isPending: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
+
+  // 0. Fetch total bounties for the Target Selection dropdown
+  const { data: bountyCount } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: BUG_BOUNTY_PLATFORM_ABI,
+    functionName: 'bountyCount',
+  });
+  const bountyCountNum = Number(bountyCount || 0);
+
+  // 1. Fetch Bounty Core
+  const { data: bountyCore, isLoading: isLoadingBounty } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: BUG_BOUNTY_PLATFORM_ABI,
     functionName: 'getBountyCore',
-    args: [parseInt(bountyIdStr || '0')]
+    args: [BigInt(bountyId)],
   });
 
-  const [pdfFile, setPdfFile] = useState<File | null>(null);
-  const [pdfBase64, setPdfBase64] = useState<string>('');
+  // 2. Fetch Required Stake
+  const { data: requiredStake } = useReadContract({
+    address: CONTRACT_ADDRESS,
+    abi: BUG_BOUNTY_PLATFORM_ABI,
+    functionName: 'getRequiredStake',
+    args: [BigInt(bountyId), address!],
+    query: { enabled: !!address }
+  });
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) {
-      setPdfFile(null);
-      setPdfBase64('');
-      return;
-    }
-    if (file.type !== 'application/pdf') {
-      alert('Only PDF files are allowed!');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      alert('File size exceeds the 5MB limit.');
-      return;
-    }
-    setPdfFile(file);
-    const reader = new FileReader();
-    reader.onload = (event) => setPdfBase64(event.target?.result as string);
-    reader.readAsDataURL(file);
-  };
+  // 3. Fetch Token Info
+  const tokenAddr = bountyCore ? (bountyCore as any)[1] : null;
+  const token = tokenAddr ? getTokenByAddress(tokenAddr) : null;
 
-  const [status, setStatus] = useState('');
-  const [savedKey, setSavedKey] = useState('');
-  const [hasSavedKey, setHasSavedKey] = useState(false);
-  const [currentStep, setCurrentStep] = useState(-1);
-  const [completed, setCompleted] = useState(false);
+  // 4. Check Allowance
+  const { data: allowance } = useReadContract({
+    address: tokenAddr as `0x${string}`,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: [address!, CONTRACT_ADDRESS as `0x${string}`],
+    query: { enabled: !!address && !!tokenAddr }
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isConnected) return alert('Please connect your wallet first');
-    if (chainId !== 421614) return alert('Please switch to Arbitrum Sepolia network.');
-    if (!hasSavedKey) return alert('You must check the key confirmation box.');
-    if (stepsText.length < 50 || impact.length < 50 || poc.length < 50) return alert('Content too short. Provide rigorous detail.');
-    if (!bountyCore) return alert('Could not fetch bounty details. Is the ID correct?');
+    if (!isConnected || !chainId) return setStatus('Connect your wallet first');
 
+    setStatus('Encrypting report client-side...');
     try {
-      setCurrentStep(0);
-      setStatus('Generating encryption keys...');
-      const key = await generateKey();
-      const exportedRawKey = await exportKey(key);
-      setSavedKey(exportedRawKey);
+      // 1. Prepare and Encrypt
+      const { submission, qualityScore } = await prepareSubmission(
+        { steps, impact, poc, metadata: { severity, tags: ['Web3'] } },
+        bountyId,
+        chainId
+      );
 
-      setStatus('Encrypting report locally...');
-      const payload = JSON.stringify({ title, steps: stepsText, impact, poc, pdfAttachment: pdfBase64 });
-      const bountyId = parseInt(bountyIdStr);
-      const { ciphertext, iv } = await encryptData(key, payload, 421614, bountyId);
-
-      setCurrentStep(1);
-      setStatus('Uploading encrypted payload to IPFS...');
-      const cid = await uploadToIPFS({ v: '1.0', ciphertext, iv });
-
-      setCurrentStep(2);
-
-      const tokenAddress = (bountyCore as any)[1];
-      const stakeAmount = (bountyCore as any)[3];
-
-      if (BigInt(stakeAmount) > 0n) {
-        setStatus('Approving stake tokens...');
-        await writeContractAsync({
-          abi: erc20Abi,
-          address: tokenAddress as `0x${string}`,
+      // 2. Handle Approval if needed
+      const stake = requiredStake ? BigInt(requiredStake.toString()) : BigInt(0);
+      if (stake > 0 && (!allowance || BigInt(allowance.toString()) < stake)) {
+        setStatus(`Approving ${token?.symbol || 'Tokens'} for Stake...`);
+        setIsApproving(true);
+        const approveHash = await writeContractAsync({
+          address: tokenAddr as `0x${string}`,
+          abi: ERC20_ABI,
           functionName: 'approve',
-          args: [CONTRACT_ADDRESS as `0x${string}`, BigInt(stakeAmount)],
-          chainId: 421614,
-          maxFeePerGas: BigInt(50000000000),
-          maxPriorityFeePerGas: BigInt(1000000000),
+          args: [CONTRACT_ADDRESS as `0x${string}`, stake],
         });
+        setStatus('Waiting for approval confirmation...');
+        setTxHash(approveHash);
+        setIsApproving(false);
+        return;
       }
 
-      setStatus('Awaiting wallet signature for submission...');
-      const hSteps = ethers.keccak256(ethers.toUtf8Bytes(stepsText));
-      const hImpact = ethers.keccak256(ethers.toUtf8Bytes(impact));
-      const hPoc = ethers.keccak256(ethers.toUtf8Bytes(poc));
-      const cidDigest = ethers.keccak256(ethers.toUtf8Bytes(cid));
-      const saltBytes = window.crypto.getRandomValues(new Uint8Array(32));
-      const salt = ethers.hexlify(saltBytes);
-
-      await writeContractAsync({
+      // 3. Submit Report
+      setStatus('Awaiting wallet signature for Submission...');
+      const hash = await writeContractAsync({
         abi: BUG_BOUNTY_PLATFORM_ABI as any,
         address: CONTRACT_ADDRESS as `0x${string}`,
         functionName: 'submitReport',
-        args: [BigInt(bountyId), salt as `0x${string}`, cidDigest as `0x${string}`, hSteps as `0x${string}`, hImpact as `0x${string}`, hPoc as `0x${string}`],
-        chainId: 421614,
-        maxFeePerGas: BigInt(50000000000),
-        maxPriorityFeePerGas: BigInt(1000000000),
+        args: [
+          BigInt(bountyId),
+          submission.salt as `0x${string}`,
+          submission.cidDigest as `0x${string}`,
+          submission.hSteps as `0x${string}`,
+          submission.hImpact as `0x${string}`,
+          submission.hPoc as `0x${string}`,
+        ],
       });
 
-      setCurrentStep(3);
-      setCompleted(true);
-      setStatus('Report submitted successfully!');
+      setTxHash(hash);
+      setStatus('Submission transaction submitted. Waiting for confirmation...');
     } catch (error: any) {
-      setStatus(`Failed: ${error.message || 'Unknown error'}`);
+      console.error(error);
+      setStatus(`Failed: ${error.shortMessage || error.message || 'Unknown error'}`);
     }
   };
 
+  if (isConfirmed && !isApproving) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-20 text-center animate-fade-in">
+        <div className="w-24 h-24 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-emerald-500/20">
+          <Send className="w-10 h-10" />
+        </div>
+        <h2 className="text-4xl font-extrabold text-white mb-4">Transmission Successful</h2>
+        <p className="text-gray-500 mb-8 max-w-md mx-auto">
+          Your report has been encrypted and committed to the blockchain. The committee will review your findings within the bounty's SLA window.
+        </p>
+        <div className="flex justify-center gap-4">
+          <Link href="/" className="btn-primary py-3 px-8">Back to Explorer</Link>
+          <a href={`https://sepolia.arbiscan.io/tx/${txHash}`} target="_blank" rel="noreferrer" className="btn-secondary py-3 px-8">Audit Transaction</a>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="animate-fade-in max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      {/* Network Warning */}
-      {isOnWrongNetwork && (
-        <div className="glass-card p-4 mb-6 border-amber-200 dark:border-amber-500/20 bg-amber-50/50 dark:bg-amber-500/5">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-            <div className="flex-1">
-              <p className="font-semibold text-amber-800 dark:text-amber-300">Wrong Network Detected</p>
-              <p className="text-sm text-amber-700/80 dark:text-amber-400/80 mt-1">
-                You need to be on <strong>Arbitrum Sepolia</strong> to submit reports. Current chain ID: {chainId}
-              </p>
-              <button
-                onClick={() => switchChain({ chainId: 421614 })}
-                className="mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium transition-colors"
-              >
-                Switch to Arbitrum Sepolia
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Faucet Link */}
-      {isConnected && chainId === 421614 && (
-        <div className="glass-card p-4 mb-6 border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-              <div>
-                <p className="font-semibold text-emerald-800 dark:text-emerald-300 text-sm">Need test tokens?</p>
-                <p className="text-xs text-emerald-700/70 dark:text-emerald-400/70">Get free USDC and ETH on Arbitrum Sepolia</p>
-              </div>
-            </div>
-            <a
-              href="/faucet"
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              Open Faucet
-            </a>
-          </div>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="text-center mb-8">
-        <div className="inline-flex p-3 rounded-2xl bg-brand-50 dark:bg-brand-500/10 mb-4">
-          <Shield className="w-8 h-8 text-brand-600 dark:text-brand-400" />
-        </div>
-        <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white">Submit Vulnerability Report</h1>
-        <p className="mt-2 text-gray-500 dark:text-gray-400">Your report is encrypted client-side before leaving your browser.</p>
-      </div>
-
-      {/* Stepper */}
-      <div className="flex items-center justify-center gap-2 mb-8">
-        {steps.map((s, i) => (
-          <React.Fragment key={i}>
-            <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all duration-300 ${
-              currentStep > i ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-              : currentStep === i ? 'bg-brand-50 dark:bg-brand-500/10 text-brand-600 dark:text-brand-400 animate-pulse-glow'
-              : 'bg-gray-100 dark:bg-slate-800 text-gray-400 dark:text-gray-500'}`}>
-              {currentStep > i ? <CheckCircle className="w-4 h-4" /> : <s.icon className="w-4 h-4" />}
-              <span className="hidden sm:inline">{s.label}</span>
-            </div>
-            {i < steps.length - 1 && <div className={`w-8 h-0.5 rounded ${currentStep > i ? 'bg-emerald-400' : 'bg-gray-200 dark:bg-slate-700'}`} />}
-          </React.Fragment>
-        ))}
-      </div>
-
-      {/* Key Display */}
-      {savedKey && (
-        <div className="glass-card p-4 mb-6 border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/5">
-          <div className="flex items-start gap-3">
-            <Key className="w-5 h-5 text-emerald-600 dark:text-emerald-400 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="font-semibold text-emerald-800 dark:text-emerald-300 text-sm">Decryption Key — Save This!</p>
-              <code className="text-xs break-all text-emerald-700 dark:text-emerald-400 mt-1 block">{savedKey}</code>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="glass-card p-6 sm:p-8 space-y-5">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 animate-fade-in">
+      <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
-          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Select Target Bounty</label>
-          {activeBounties.length === 0 ? (
-            <div className="p-4 border border-dashed border-gray-300 dark:border-slate-700 rounded-xl text-center text-sm text-gray-500">
-              Loading active bounties...
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
-              {activeBounties.map(b => {
-                const isSelected = bountyIdStr === String(b.id);
-                return (
-                  <div
-                    key={b.id!}
-                    onClick={() => setBountyIdStr(String(b.id))}
-                    className={`p-4 rounded-xl cursor-pointer border transition-all duration-200 flex items-start gap-4 ${
-                      isSelected 
-                        ? 'border-brand-500 bg-brand-50 dark:bg-brand-500/10 shadow-sm shadow-brand-500/20 ring-1 ring-brand-500' 
-                        : 'border-gray-200 dark:border-slate-700 hover:border-brand-300 bg-white dark:bg-slate-900'
-                    }`}
-                  >
-                    <div className={`p-2 rounded-lg flex-shrink-0 ${isSelected ? 'bg-brand-100 dark:bg-brand-500/20 text-brand-600 dark:text-brand-400' : 'bg-gray-100 dark:bg-slate-800 text-gray-400'}`}>
-                       <Target className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className={`font-bold ${isSelected ? 'text-brand-700 dark:text-brand-300' : 'text-gray-900 dark:text-white'}`}>
-                        Bounty #{b.id}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1 font-mono truncate" title={String(b.core![1])}>
-                        {String(b.core![1]).slice(0, 10)}...{String(b.core![1]).slice(-8)}
-                      </div>
-                    </div>
-                    {isSelected && <CheckCircle className="w-5 h-5 text-brand-500 ml-auto flex-shrink-0" />}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Vulnerability Title</label>
-          <input type="text" value={title} onChange={e => setTitle(e.target.value)} required placeholder="e.g. Reentrancy in withdraw()" className="input-field" />
-        </div>
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Steps to Reproduce</label>
-          <textarea value={stepsText} onChange={e => setStepsText(e.target.value)} required rows={4} placeholder="Detailed steps to reproduce the vulnerability..." className="input-field resize-none" />
-        </div>
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Impact Assessment</label>
-          <textarea value={impact} onChange={e => setImpact(e.target.value)} required rows={3} placeholder="Describe the severity and potential damage..." className="input-field resize-none" />
-        </div>
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Proof of Concept</label>
-          <textarea value={poc} onChange={e => setPoc(e.target.value)} required rows={4} placeholder="Working exploit code or proof..." className="input-field resize-none font-mono text-sm" />
+           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-bold uppercase tracking-widest mb-4">
+              <Zap className="w-4 h-4" /> Secure Submission Interface
+           </div>
+           <h1 className="text-4xl sm:text-5xl font-extrabold text-white">Submit Findings</h1>
+           <p className="text-gray-500 mt-2 max-w-xl">
+             Your report will be encrypted in your browser using AES-256-GCM. 
+             Metadata hashes and your stake ensure the integrity of your discovery.
+           </p>
         </div>
         
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Attachment (PDF, Max 5MB)</label>
-          <input 
-            type="file" 
-            accept="application/pdf"
-            onChange={handleFileChange}
-            className="block w-full text-sm text-gray-500
-              file:mr-4 file:py-2.5 file:px-4
-              file:rounded-xl file:border border-gray-200 dark:border-slate-800
-              file:text-sm file:font-semibold
-              file:bg-brand-50 file:text-brand-700
-              hover:file:bg-brand-100 transition-colors
-              dark:file:bg-brand-500/10 dark:file:text-brand-400 dark:hover:file:bg-brand-500/20"
-          />
+        <div className="glass-card px-6 py-4 flex items-center gap-4 min-w-[300px]">
+           <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center">
+              <Target className="w-6 h-6 text-brand-500" />
+           </div>
+           <div>
+              <div className="text-xs font-bold text-gray-600 uppercase">Target Selection</div>
+              <select 
+                value={bountyId} 
+                onChange={(e) => setBountyId(parseInt(e.target.value))}
+                className="bg-transparent text-white font-bold text-lg outline-none cursor-pointer w-full appearance-none"
+              >
+                {bountyCountNum === 0 ? (
+                  <option value={0} className="bg-slate-950">No instances found</option>
+                ) : (
+                  Array.from({ length: bountyCountNum }).map((_, i) => (
+                    <option key={i} value={i} className="bg-slate-950">Program Instance #{i}</option>
+                  ))
+                )}
+              </select>
+           </div>
         </div>
+      </div>
 
-        <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-50 dark:bg-amber-500/5 border border-amber-200 dark:border-amber-500/20">
-          <input id="key-saved" type="checkbox" checked={hasSavedKey} onChange={e => setHasSavedKey(e.target.checked)} className="mt-1 w-4 h-4 rounded text-brand-600 focus:ring-brand-500" />
-          <label htmlFor="key-saved" className="text-sm">
-            <span className="font-semibold text-amber-800 dark:text-amber-300">I will securely store my decryption key.</span>
-            <span className="block text-amber-700/70 dark:text-amber-400/70 text-xs mt-0.5">Losing it means the committee cannot decrypt your report — your stake will be forfeited.</span>
-          </label>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Form Column */}
+        <form onSubmit={handleSubmit} className="lg:col-span-8 space-y-8">
+           <div className="glass-card p-8 space-y-6">
+              <div className="flex items-center gap-3 text-white mb-2">
+                 <Terminal className="w-6 h-6 text-brand-500" />
+                 <h3 className="text-xl font-bold">Vulnerability Details</h3>
+              </div>
+
+              <div className="space-y-4">
+                 <div>
+                    <label className="block text-sm font-semibold text-gray-400 mb-2">Technical Description & Steps to Reproduce</label>
+                    <textarea 
+                        value={steps}
+                        onChange={e => setSteps(e.target.value)}
+                        required
+                        className="input-field min-h-[200px] font-mono text-sm" 
+                        placeholder="1. Navigate to...\n2. Provide input...\n3. Observe..."
+                    />
+                 </div>
+                 
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-400 mb-2">Impact Analysis</label>
+                        <textarea 
+                            value={impact}
+                            onChange={e => setImpact(e.target.value)}
+                            required
+                            className="input-field min-h-[150px] text-sm" 
+                            placeholder="An attacker can spend tokens they don't own because..." 
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-400 mb-2">Proof of Concept (PoC)</label>
+                        <textarea 
+                            value={poc}
+                            onChange={e => setPoc(e.target.value)}
+                            required
+                            className="input-field min-h-[150px] font-mono text-xs" 
+                            placeholder="// Foundry test or exploit script\nfunction testExplit() {\n  ..." 
+                        />
+                    </div>
+                 </div>
+              </div>
+           </div>
+
+           <div className="glass-card p-8">
+              <div className="flex flex-col sm:flex-row gap-6">
+                 <div className="flex-1">
+                    <label className="block text-sm font-semibold text-gray-400 mb-3">Self-Assessed Severity</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                       {(['low', 'medium', 'high', 'critical'] as const).map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setSeverity(s)}
+                            className={`py-2 px-3 rounded-lg border text-xs font-bold uppercase transition-all ${
+                              severity === s 
+                                ? 'bg-brand-500/10 border-brand-500 text-brand-500 shadow-lg shadow-brand-500/5' 
+                                : 'bg-slate-900 border-slate-800 text-gray-600 hover:border-slate-700'
+                            }`}
+                          >
+                             {s}
+                          </button>
+                       ))}
+                    </div>
+                 </div>
+                 <div className="shrink-0 flex items-center">
+                    <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/10 text-amber-500/70 text-xs max-w-[200px] italic">
+                         Ensuring accurate self-assessment improves your potential reputation multiplier.
+                    </div>
+                 </div>
+              </div>
+           </div>
+
+           <div className="p-1 rounded-2xl bg-gradient-to-br from-brand-500 to-purple-600">
+              <button 
+                type="submit" 
+                disabled={!isConnected || isConfirming}
+                className="w-full bg-slate-950 py-5 rounded-[14px] font-extrabold text-xl text-white hover:bg-slate-900 transition-colors flex flex-col items-center gap-1 group disabled:opacity-50"
+              >
+                 <span className="flex items-center gap-3">
+                    {isConfirming ? (
+                      <Loader2 className="w-6 h-6 animate-spin" />
+                    ) : (
+                      <Lock className="w-5 h-5 text-brand-500 group-hover:scale-110 transition-transform" />
+                    )}
+                    {isApproving ? 'Confirming Stake Approval...' : isConfirming ? 'Transmitting Hash...' : 'Encrypt & Submit Report'}
+                 </span>
+                 {!isConnected && <span className="text-[10px] text-rose-500 uppercase">Wallet Connection Required</span>}
+              </button>
+           </div>
+        </form>
+
+        {/* Sidebar Column */}
+        <div className="lg:col-span-4 space-y-6">
+           {/* Staking Insights */}
+           <div className="glass-card p-6 space-y-6">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                 <Coins className="w-4 h-4 text-brand-500" /> Researcher Stake
+              </h3>
+              
+              <div className="space-y-4">
+                 <div className="flex justify-between items-end border-b border-slate-800 pb-4">
+                    <div className="text-xs font-bold text-gray-500 uppercase tracking-tighter">Required Stake</div>
+                    <div className="text-2xl font-black text-white">
+                       {requiredStake ? formatTokenAmount(requiredStake.toString(), token?.decimals) : '0.00'} 
+                       <span className="text-xs text-gray-600 ml-1 font-bold">{token?.symbol || 'USDC'}</span>
+                    </div>
+                 </div>
+                 
+                 <div className="space-y-3">
+                    <div className="flex justify-between text-xs">
+                       <span className="text-gray-500 font-medium">Bounty Potential</span>
+                       <span className="text-emerald-500 font-bold">
+                          {bountyCore ? formatTokenAmount((bountyCore as any)[2], token?.decimals) : '0'} {token?.symbol}
+                       </span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                       <span className="text-gray-500 font-medium">Approval Status</span>
+                       {allowance && requiredStake && BigInt(allowance.toString()) >= BigInt(requiredStake.toString()) ? (
+                          <span className="text-emerald-500 font-bold flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Ready</span>
+                       ) : (
+                          <span className="text-amber-500 font-bold flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Approval Needed</span>
+                       )}
+                    </div>
+                 </div>
+              </div>
+           </div>
+
+           {/* Encryption Info */}
+           <div className="glass-card p-6 border-brand-500/10">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-4">
+                 <Fingerprint className="w-4 h-4 text-brand-500" /> Evidence Privacy
+              </h3>
+              <div className="space-y-4">
+                 <div className="relative p-4 rounded-xl bg-slate-900 overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <Lock className="w-12 h-12" />
+                    </div>
+                    <p className="text-xs text-gray-500 leading-relaxed relative z-10">
+                       We use <span className="text-white font-bold">Client-Side Encryption</span>. Your vulnerability evidence never touches our servers in plain text. Only the elected committee members can decrypt it using their private keys.
+                    </p>
+                 </div>
+                 <div className="flex items-center gap-3 px-1">
+                    <div className="shrink-0 w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                        <Shield className="w-4 h-4 text-emerald-500" />
+                    </div>
+                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest leading-none">Tamper-Proof Metadata Hashes</span>
+                 </div>
+              </div>
+           </div>
+
+           {status && (
+              <div className={`p-4 rounded-xl text-sm font-medium border shadow-2xl animate-slide-up ${
+                 status.includes('Failed') ? 'bg-rose-500/10 border-rose-500/20 text-rose-400' : 'bg-brand-500/10 border-brand-500/20 text-brand-400'
+              }`}>
+                 {status}
+              </div>
+           )}
         </div>
-
-        <button type="submit" disabled={!isConnected || !hasSavedKey || completed} className="btn-primary w-full text-base">
-          {!isConnected ? 'Connect Wallet to Submit' : completed ? '✓ Report Submitted' : 'Encrypt & Submit Report'}
-        </button>
-
-        {status && (
-          <div className={`flex items-center gap-2 p-3 rounded-xl text-sm font-medium ${completed
-            ? 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-            : status.includes('Failed') ? 'bg-red-50 dark:bg-red-500/10 text-red-700 dark:text-red-300'
-            : 'bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300'}`}>
-            {completed ? <CheckCircle className="w-4 h-4" /> : status.includes('Failed') ? <AlertCircle className="w-4 h-4" /> : <div className="w-4 h-4 rounded-full border-2 border-brand-500 border-t-transparent animate-spin" />}
-            {status}
-          </div>
-        )}
-      </form>
+      </div>
     </div>
   );
 }

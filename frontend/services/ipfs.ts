@@ -21,6 +21,12 @@ export interface EncryptedReport {
   cid: string;
 }
 
+export interface BountyMetadata {
+  tags: string[];
+  description?: string;
+  externalLink?: string;
+}
+
 export interface SubmissionData {
   salt: string;
   cidDigest: string;
@@ -168,6 +174,47 @@ export async function prepareSubmission(
     submission: { salt, cidDigest, hSteps, hImpact, hPoc },
     qualityScore
   };
+}
+
+/**
+ * Upload bounty metadata (tags, etc.) to IPFS
+ */
+export async function uploadBountyMetadata(metadata: BountyMetadata): Promise<string> {
+  if (!PINATA_JWT) {
+    throw new Error('Pinata JWT not configured');
+  }
+
+  const blob = new Blob([JSON.stringify(metadata)], { type: 'application/json' });
+  const formData = new FormData();
+  formData.append('file', blob, 'bounty-metadata.json');
+
+  const response = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${PINATA_JWT}` },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`IPFS metadata upload failed: ${error}`);
+  }
+
+  const result = await response.json();
+  return result.IpfsHash;
+}
+
+/**
+ * Fetch and parse bounty metadata from IPFS
+ */
+export async function fetchBountyMetadata(cid: string): Promise<BountyMetadata | null> {
+  try {
+    const res = await fetch(`https://gateway.pinata.cloud/ipfs/${cid}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.error('Failed to fetch bounty metadata:', e);
+    return null;
+  }
 }
 
 export async function fetchFromIPFS(cid: string): Promise<Uint8Array> {

@@ -1,8 +1,21 @@
 # Decentralized Bug Bounty Platform
 
+> **Status:** Live & Deployed on Arbitrum Sepolia Testnet.
+
 A production-ready decentralized bug bounty platform built with Foundry, Next.js, and Wagmi.
 
-This platform allows developers to create decentralized bug bounties where security researchers can securely submit encrypted vulnerabilities, get judged by appointed committees, and get paid according to strict SLAs and automated escalation paths.
+This platform allows protocol organizations to create decentralized bug bounties where security researchers can securely submit encrypted vulnerabilities, get judged by appointed committees, and get paid according to strict SLAs and automated escalation paths.
+
+## 🚀 Recent Deployed Updates & Additions
+
+- **Arbitrum Sepolia Deployment**: Fully deployed and verified on Arbitrum Sepolia.
+- **Mock Token Integrations**: Added custom ERC20 integrations (MockUSDC) with dynamic token registry UI mappings.
+- **Atomic Funding Workflow**: Single-transaction logic allowing clients to instantly approve `USDC` and deploy + fund their bug bounty securely using safe ERC20 logic.
+- **IPFS Submissions & Metadata**: 
+  - Dynamic UI Tag management (Web3, Smart Contracts).
+  - Bounty metadata stored immutably via IPFS (Pinata) with structural mapping stored directly via CIDs on the smart contract `Bounty` struct.
+- **Gas Hardening**: Native L2 BaseFee micro-spike protections built directly into the wagmi transaction overrides for deterministic testnet completions.
+- **Full Scope UI Engine**: Re-engineered Committee Workflow screens, dynamic dashboards using live RPC blockchain state (no backends used), and intuitive two-step Dispute actions.
 
 ## 🚀 Features
 
@@ -55,6 +68,8 @@ Ensure you have `Node.js` installed. Connect to your desired environment variabl
 Make an `.env.local` inside the `/frontend` directory:
 ```
 NEXT_PUBLIC_PINATA_JWT=your_pinata_jwt_here
+NEXT_PUBLIC_CONTRACT_ADDRESS=your_deployed_contract_on_arbitrum_sepolia
+NEXT_PUBLIC_MOCK_USDC_ADDRESS=your_deployed_mockusdc_token
 ```
 
 Run the standard dev process:

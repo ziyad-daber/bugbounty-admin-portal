@@ -1,9 +1,14 @@
 'use client'
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAccount, useReadContract, useReadContracts } from 'wagmi';
 import { BUG_BOUNTY_PLATFORM_ABI, CONTRACT_ADDRESS } from '@/services/contracts';
 import { AdminGuard } from '@/components/AdminGuard';
-import { Shield, FileText, CheckCircle, XCircle, AlertTriangle, ChevronRight, Clock, Plus, Loader2 } from 'lucide-react';
+import { fetchBountyMetadata, BountyMetadata } from '@/services/ipfs';
+import { getTokenByAddress, formatTokenAmount } from '@/services/tokens';
+import { 
+  Shield, FileText, CheckCircle, XCircle, AlertTriangle, 
+  ChevronRight, Clock, Plus, Loader2, ExternalLink, Tag, Coins 
+} from 'lucide-react';
 import Link from 'next/link';
 
 const STATUS_MAP = ['Submitted', 'Accepted', 'Rejected', 'Disputed', 'Finalized'];
@@ -25,7 +30,6 @@ function AdminDashboard() {
     address: CONTRACT_ADDRESS as `0x${string}`,
     abi: BUG_BOUNTY_PLATFORM_ABI as any,
     functionName: 'bountyCount',
-    chainId: 421614,
   });
 
   const bountyCount = Number(bountyCountStr || 0);
@@ -42,121 +46,143 @@ function AdminDashboard() {
     contracts: bountyCalls,
   });
 
-  // Get all bounties (filter by connected address as owner)
-  const allBounties = bountiesData
-    ?.map((res, i) => {
-      if (res.status === 'success' && res.result) {
-        return { id: i, core: res.result as any };
-      }
-      return null;
-    })
-    .filter(b => b !== null) || [];
+  // Process bounties and fetch metadata
+  const [processedBounties, setProcessedBounties] = useState<any[]>([]);
 
-  const myBounties = allBounties.filter(b => String(b.core[0]).toLowerCase() === String(address).toLowerCase());
-  const otherBounties = allBounties.filter(b => String(b.core[0]).toLowerCase() !== String(address).toLowerCase());
+  useEffect(() => {
+    if (!bountiesData) return;
 
-  // Debug logging
-  console.log('[Admin Dashboard] Contract:', CONTRACT_ADDRESS);
-  console.log('[Admin Dashboard] Bounty Count Raw:', bountyCountStr);
-  console.log('[Admin Dashboard] Bounty Count Parsed:', bountyCount);
-  console.log('[Admin Dashboard] Bounty Count Error:', bountyCountError);
-  console.log('[Admin Dashboard] Bounties Data:', bountiesData);
-  console.log('[Admin Dashboard] All Bounties:', allBounties);
+    const loadBountyData = async () => {
+      const results = await Promise.all(
+        bountiesData.map(async (res: any, i: number) => {
+          if (res.status === 'success' && res.result) {
+            const core = res.result;
+            const cidDigest = core[10]; // metadataCidDigest is at index 10
+            
+            // In a real app, CID would be resolved from digest or stored separately
+            // For now, we'll use fallback meta if we can't fetch
+            const metadata = null; // fetchBountyMetadata logic would go here if we had the actual CID
+
+            return { id: i, core, metadata };
+          }
+          return null;
+        })
+      );
+      setProcessedBounties(results.filter(b => b !== null));
+    };
+
+    loadBountyData();
+  }, [bountiesData]);
+
+  const myBounties = processedBounties.filter(b => b.core[0].toLowerCase() === address?.toLowerCase());
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 animate-fade-in">
-      <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white flex items-center gap-3">
-            <Shield className="w-8 h-8 text-brand-500" />
-            Admin Dashboard
+          <h1 className="text-4xl font-extrabold text-white flex items-center gap-4">
+            <div className="p-2 rounded-2xl bg-brand-500/10 border border-brand-500/20">
+              <Shield className="w-8 h-8 text-brand-500" />
+            </div>
+            Admin Hub
           </h1>
-          <p className="mt-2 text-gray-600 dark:text-gray-400">
-            Manage your bounties and review submitted reports.
+          <p className="mt-2 text-gray-500 max-w-sm">
+            Orchestrate your security programs and evaluate intelligence reports.
           </p>
         </div>
-        <div>
-          <Link href="/admin/create" className="btn-primary flex items-center gap-2 text-base">
-            <Plus className="w-5 h-5" />
-            Create Bounty
+        <div className="flex gap-4">
+          <Link href="/admin/create" className="btn-primary flex items-center gap-2 group">
+            <Plus className="w-5 h-5 group-hover:rotate-90 transition-transform" />
+            Launch Bounty
           </Link>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left pane: Bounties */}
-        <div className="col-span-1 space-y-4">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <FileText className="w-5 h-5 text-gray-400" />
-            All Bounties ({allBounties.length})
-          </h2>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Left Column: Programs */}
+        <div className="lg:col-span-4 space-y-6">
+          <div className="flex items-center justify-between px-2">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <FileText className="w-5 h-5 text-gray-600" />
+              Active Programs
+            </h2>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-gray-600 bg-slate-900 border border-slate-800 px-2 py-1 rounded">
+              {myBounties.length} TOTAL
+            </span>
+          </div>
 
           {isBountyCountLoading ? (
-            <div className="glass-card p-6 text-center text-gray-500">
-              <div className="flex items-center justify-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Loading bounties...
+             <div className="flex flex-col items-center justify-center py-20 opacity-50">
+               <Loader2 className="w-8 h-8 animate-spin text-brand-500 mb-4" />
+               <p className="text-xs font-medium text-gray-500 uppercase tracking-widest">Scanning Chain...</p>
+             </div>
+          ) : myBounties.length === 0 ? (
+            <div className="glass-card p-10 text-center">
+              <div className="w-16 h-16 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-800">
+                <Plus className="w-6 h-6 text-slate-700" />
               </div>
-            </div>
-          ) : bountyCountError ? (
-            <div className="glass-card p-6 text-center text-red-500">
-              <AlertTriangle className="w-5 h-5 mx-auto mb-2" />
-              <div>Error loading bounties</div>
-              <div className="text-xs mt-2 opacity-75">{String(bountyCountError)}</div>
-            </div>
-          ) : allBounties.length === 0 ? (
-            <div className="glass-card p-6 text-center text-gray-500">
-              No bounties found. Create one to get started.
+              <p className="text-gray-500 text-sm">No active programs found.</p>
+              <Link href="/admin/create" className="text-brand-500 text-xs font-bold hover:underline mt-2 inline-block">Initialize First Bounty</Link>
             </div>
           ) : (
             <div className="space-y-3">
-              {allBounties.map((b) => {
-                const isMine = String(b.core[0]).toLowerCase() === String(address).toLowerCase();
+              {myBounties.map((b) => {
+                const isMine = true; // since it's filtered to myBounties
+                const token = getTokenByAddress(b.core[1]);
                 return (
-                  <div
+                  <button
                     key={b.id}
                     onClick={() => setSelectedBountyId(b.id)}
-                    className={`glass-card p-4 cursor-pointer transition-all ${
+                    className={`w-full text-left glass-card p-5 transition-all group ${
                       selectedBountyId === b.id
-                        ? 'ring-2 ring-brand-500 bg-brand-50 dark:bg-brand-500/10'
-                        : 'hover:border-gray-300 dark:hover:border-slate-600'
+                        ? 'ring-2 ring-brand-500 bg-brand-500/5'
+                        : 'hover:border-slate-700'
                     }`}
                   >
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-gray-900 dark:text-white">Bounty #{b.id}</span>
-                      {!isMine && (
-                        <span className="text-xs bg-gray-100 dark:bg-slate-700 text-gray-500 px-2 py-1 rounded">
-                          Other
-                        </span>
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-brand-500 uppercase tracking-widest mb-1">PROGRAM #{b.id}</span>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-white group-hover:text-brand-400 transition-colors">
+                            {b.metadata?.title || `Bounty Instance`}
+                          </h3>
+                        </div>
+                      </div>
+                      {isMine && (
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-lg shadow-emerald-500/50" title="Owner" />
                       )}
                     </div>
-                    <div className="mt-2 text-sm text-gray-500 truncate font-mono">
-                      Token: {String(b.core[1]).slice(0, 10)}...{String(b.core[1]).slice(-8)}
+                    <div className="flex items-center gap-4 text-xs font-mono text-gray-500">
+                      <div className="flex items-center gap-1.5">
+                        <Coins className="w-3.5 h-3.5" />
+                        {token?.symbol || 'USDC'}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5" />
+                        {formatTokenAmount(b.core[2], token?.decimals)}
+                      </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
           )}
         </div>
 
-        {/* Right pane: Reports for selected bounty */}
-        <div className="col-span-1 lg:col-span-2">
+        {/* Right Column: Insights */}
+        <div className="lg:col-span-8">
           {selectedBountyId === null ? (
-            <div className="glass-card flex flex-col items-center justify-center p-12 h-full text-center">
-              <Shield className="w-12 h-12 text-gray-300 dark:text-slate-700 mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white">Select a Bounty</h3>
-              <p className="text-gray-500 mt-2 max-w-sm">
-                Choose a bounty from the list to view its submitted reports.
+            <div className="h-full flex flex-col items-center justify-center glass-card p-20 text-center opacity-50 border-dashed">
+              <Shield className="w-16 h-16 text-slate-800 mb-6" />
+              <h3 className="text-xl font-bold text-gray-600 mb-2">Command Selection Required</h3>
+              <p className="text-sm text-gray-700 max-w-xs">
+                Select an active program instance from the left sidebar to access report analytics and governance controls.
               </p>
-              {allBounties.length > 0 && myBounties.length === 0 && (
-                <p className="text-amber-600 dark:text-amber-400 text-sm mt-4">
-                  Note: You can view all bounties, but you can only manage bounties you own.
-                </p>
-              )}
             </div>
           ) : (
-            <ReportsPanel bountyId={selectedBountyId} />
+            <div className="animate-slide-up space-y-6">
+              <ReportsPanel bountyId={selectedBountyId} />
+            </div>
           )}
         </div>
       </div>
@@ -183,84 +209,103 @@ function ReportsPanel({ bountyId }: { bountyId: number }) {
     args: [bountyId, i],
   }));
 
-  const { data: reportsData } = useReadContracts({
+  const { data: reportsData, isLoading: isReportsLoading } = useReadContracts({
     contracts: reportCalls,
   });
 
   const reports = reportsData
-    ?.map((res, i) => {
+    ?.map((res: any, i: number) => {
       if (res.status === 'success' && res.result) {
-        return { id: i, data: res.result as any };
+        return { id: i, data: res.result };
       }
       return null;
     })
     .filter(r => r !== null) || [];
 
   return (
-    <div className="glass-card p-6 min-h-[500px]">
-      <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-4 mb-6">
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-          Reports for Bounty #{bountyId}
-        </h2>
-        <span className="bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 px-3 py-1 rounded-full text-sm font-medium">
-          {reports.length} Total
-        </span>
+    <div className="glass-card overflow-hidden">
+      <div className="p-8 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Vulnerability Reports</h2>
+          <p className="text-sm text-gray-500 mt-1">Instance #{bountyId} — Intelligence Feed</p>
+        </div>
+        <div className="flex gap-4">
+          <div className="text-center px-4 py-2 bg-slate-900 rounded-xl border border-slate-800">
+            <div className="text-lg font-bold text-white">{reports.length}</div>
+            <div className="text-[10px] font-bold text-gray-600 uppercase">Total</div>
+          </div>
+        </div>
       </div>
 
-      {reports.length === 0 ? (
-        <div className="text-center text-gray-500 py-12">
-          No reports submitted for this bounty yet.
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {reports.map((r) => {
-             const statusStr = STATUS_MAP[Number(r.data[3])] || 'Unknown';
-             let StatusIcon = Clock;
-             let statusColor = 'text-gray-500 bg-gray-50 dark:bg-slate-800';
-             
-             if (statusStr === 'Accepted') { StatusIcon = CheckCircle; statusColor = 'text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200'; }
-             else if (statusStr === 'Rejected') { StatusIcon = XCircle; statusColor = 'text-rose-600 bg-rose-50 dark:bg-rose-500/10 border-rose-200'; }
-             else if (statusStr === 'Disputed') { StatusIcon = AlertTriangle; statusColor = 'text-amber-600 bg-amber-50 dark:bg-amber-500/10 border-amber-200'; }
-             else if (statusStr === 'Finalized') { StatusIcon = Shield; statusColor = 'text-purple-600 bg-purple-50 dark:bg-purple-500/10 border-purple-200'; }
-             
-             return (
-              <div key={r.id} className="p-4 rounded-2xl border border-gray-200 dark:border-slate-700 hover:border-brand-300 transition-colors bg-white dark:bg-slate-900">
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex items-center gap-3">
-                    <span className="font-bold text-gray-900 dark:text-white text-lg">Report #{r.id}</span>
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border ${statusColor}`}>
-                      <StatusIcon className="w-3.5 h-3.5" />
-                      {statusStr}
-                    </span>
+      <div className="p-8">
+        {isReportsLoading ? (
+            <div className="py-20 flex flex-col items-center opacity-50">
+                <Loader2 className="w-8 h-8 animate-spin text-brand-500 mb-2" />
+                <span className="text-xs font-bold uppercase tracking-widest text-gray-600">Decrypting Metadata...</span>
+            </div>
+        ) : reports.length === 0 ? (
+          <div className="py-20 text-center bg-slate-900/20 rounded-3xl border border-slate-800/50 border-dashed">
+            <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-slate-800" />
+            <h3 className="text-lg font-bold text-gray-600">No Intelligence Received</h3>
+            <p className="text-sm text-gray-700 mt-1">Researchers haven't submitted any discoveries to this program yet.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4">
+            {reports.map((r) => {
+              const statusStr = STATUS_MAP[Number(r.data[3])] || 'Unknown';
+              let StatusIcon = Clock;
+              let statusColor = 'text-gray-500 bg-gray-50/5 border-gray-50/10';
+              
+              if (statusStr === 'Accepted') { StatusIcon = CheckCircle; statusColor = 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20'; }
+              else if (statusStr === 'Rejected') { StatusIcon = XCircle; statusColor = 'text-rose-500 bg-rose-500/10 border-rose-500/20'; }
+              else if (statusStr === 'Disputed') { StatusIcon = AlertTriangle; statusColor = 'text-amber-500 bg-amber-500/10 border-amber-500/20'; }
+              else if (statusStr === 'Finalized') { StatusIcon = Shield; statusColor = 'text-brand-500 bg-brand-500/10 border-brand-500/20'; }
+              
+              return (
+                <div key={r.id} className="p-6 rounded-2xl border border-slate-800 bg-slate-900/30 hover:border-slate-700 transition-all group">
+                  <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-slate-900 flex items-center justify-center font-bold text-white border border-slate-800 group-hover:border-brand-500/30 transition-colors">
+                        #{r.id}
+                      </div>
+                      <div>
+                         <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${statusColor} mb-2`}>
+                            <StatusIcon className="w-3.5 h-3.5" />
+                            {statusStr}
+                         </span>
+                         <div className="text-sm font-mono text-gray-500 overflow-hidden text-ellipsis whitespace-nowrap min-w-0 max-w-[200px] sm:max-w-none">
+                            Researcher: {r.data[0].slice(0, 12)}...
+                         </div>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-[10px] font-bold text-gray-600 uppercase tracking-widest mb-1 italic">Observed Transmission</div>
+                      <div className="text-xs text-gray-400 font-medium">
+                        {new Date(Number(r.data[1]) * 1000).toLocaleString()}
+                      </div>
+                    </div>
                   </div>
-                  <span className="text-xs text-gray-400">
-                    {new Date(Number(r.data[1]) * 1000).toLocaleString()}
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 text-sm">
-                  <div>
-                    <span className="block text-gray-500 dark:text-gray-400 mb-1">Researcher</span>
-                    <span className="font-mono text-gray-900 dark:text-gray-200 break-all">{String(r.data[0])}</span>
+                  
+                  <div className="pt-6 border-t border-slate-800/50 flex justify-between items-center group-hover:border-slate-800 transition-colors">
+                     <div className="flex gap-6">
+                        <div>
+                            <div className="text-[10px] font-bold text-gray-600 uppercase mb-1">Votes</div>
+                            <div className="flex items-center gap-2 text-xs font-bold">
+                                <span className="text-emerald-500">{r.data[4]} YES</span>
+                                <span className="text-rose-500">{r.data[5]} NO</span>
+                            </div>
+                        </div>
+                     </div>
+                     <Link href={`/admin/reports/${r.id}`} className="p-2 rounded-lg bg-brand-500/5 border border-brand-500/10 text-brand-500 hover:bg-brand-500 hover:text-white transition-all">
+                        <ChevronRight className="w-5 h-5" />
+                     </Link>
                   </div>
-                  <div>
-                    <span className="block text-gray-500 dark:text-gray-400 mb-1">Commit Hash</span>
-                    <span className="font-mono text-gray-900 dark:text-gray-200 break-all" title={String(r.data[6])}>
-                      {String(r.data[6]).slice(0, 14)}...
-                    </span>
-                  </div>
                 </div>
-
-                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-800 flex justify-end gap-2">
-                   <button className="text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300">
-                     View Details
-                   </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

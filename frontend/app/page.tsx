@@ -2,17 +2,11 @@
 import Link from 'next/link';
 import { useReadContract, useReadContracts } from 'wagmi';
 import { BUG_BOUNTY_PLATFORM_ABI, CONTRACT_ADDRESS } from '@/services/contracts';
+import { getTokenByAddress, formatTokenAmount } from '@/services/tokens';
 import { StatCard } from '@/components/StatCard';
 import { ActivityFeed } from '@/components/ActivityFeed';
-import { Target, Coins, FileText, Scale, Send, Users, AlertTriangle, Shield, Lock, Zap, ChevronDown } from 'lucide-react';
-import { useState } from 'react';
-
-const faqItems = [
-  { q: 'How do I submit a vulnerability?', a: 'Navigate to the Submit Report page, fill in the vulnerability details, and the system will encrypt your report client-side using AES-256-GCM before uploading to IPFS. Only the committee can decrypt it.' },
-  { q: 'What happens to my stake?', a: 'Your stake is dynamically calculated based on your on-chain reputation. If your report is accepted, you get your stake back plus the bounty reward. If rejected, your stake is slashed to the treasury.' },
-  { q: 'What if the committee doesn\'t respond?', a: 'If the committee fails to review within the SLA window, anyone can trigger an auto-escalation that opens a dispute with a commit-reveal re-vote.' },
-  { q: 'How does the dispute process work?', a: 'Disputes use a two-phase commit-reveal voting scheme. Committee members first commit a hash of their vote, then reveal it. This prevents herd mentality and ensures independent judgment.' },
-];
+import { Target, Coins, FileText, Scale, Send, Users, AlertTriangle, Shield, Lock, Zap, ChevronRight, Tag } from 'lucide-react';
+import { useState, useEffect } from 'react';
 
 export default function DashboardPage() {
   const { data: bountyCount } = useReadContract({
@@ -29,7 +23,21 @@ export default function DashboardPage() {
     address: CONTRACT_ADDRESS as `0x${string}`,
     abi: BUG_BOUNTY_PLATFORM_ABI as any,
     functionName: 'getBountyCore',
-    args: [i],
+    args: [BigInt(i)],
+  }));
+
+  const stateCalls = Array.from({ length: bountyCountNum }).map((_, i) => ({
+    address: CONTRACT_ADDRESS as `0x${string}`,
+    abi: BUG_BOUNTY_PLATFORM_ABI as any,
+    functionName: 'getBountyState',
+    args: [BigInt(i)],
+  }));
+
+  const reportCountCalls = Array.from({ length: bountyCountNum }).map((_, i) => ({
+    address: CONTRACT_ADDRESS as `0x${string}`,
+    abi: BUG_BOUNTY_PLATFORM_ABI as any,
+    functionName: 'reportCount',
+    args: [BigInt(i)],
   }));
 
   const { data: bountiesData } = useReadContracts({
@@ -37,131 +45,157 @@ export default function DashboardPage() {
     query: { refetchInterval: 10000 },
   });
 
-  // Calculate total rewards locked (sum of rewardAmount)
+  const { data: statesData } = useReadContracts({
+    contracts: stateCalls,
+    query: { refetchInterval: 10000 },
+  });
+
+  const { data: reportCountsData } = useReadContracts({
+    contracts: reportCountCalls as any,
+    query: { refetchInterval: 10000 },
+  });
+
+  // Process data
   const totalRewardsUsdc = (bountiesData || []).reduce((acc, res) => {
     if (res.status === 'success' && res.result) {
-      // result is an array: [owner, token, rewardAmount, ...]
+      // res.result is [owner, token, rewardAmount, ...]
       const reward = Number((res.result as any[])[2]) / 1000000;
       return acc + reward;
     }
     return acc;
   }, 0);
 
-  // Fetch all report counts
-  const reportCountCalls = Array.from({ length: bountyCountNum }).map((_, i) => ({
-    address: CONTRACT_ADDRESS as `0x${string}`,
-    abi: BUG_BOUNTY_PLATFORM_ABI as any,
-    functionName: 'reportCount',
-    args: [i],
-  }));
-
-  const { data: reportCountsData } = useReadContracts({
-    contracts: reportCountCalls,
-    query: { refetchInterval: 10000 },
-  });
-
-  const totalReportsSubmitted = (reportCountsData || []).reduce((acc, res) => {
+  const totalEscrowUsdc = (statesData || []).reduce((acc, res) => {
     if (res.status === 'success' && res.result) {
-      return acc + Number(res.result);
+      const balance = Number((res.result as any[])[6]) / 1000000;
+      return acc + balance;
     }
     return acc;
   }, 0);
 
-  const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const activeBountiesCount = (statesData || []).filter(res => res.status === 'success' && res.result && (res.result as any)[5]).length;
+
+  const totalReportsCount = (reportCountsData || []).reduce((acc, res) => {
+    if (res.status === 'success' && res.result) return acc + Number(res.result);
+    return acc;
+  }, 0);
+
+  const uniqueOwners = new Set(
+    (bountiesData || []).map(r => r.status === 'success' && r.result ? (r.result as any)[0] : null).filter(Boolean)
+  ).size;
 
   return (
-    <div className="animate-fade-in">
-      {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-brand-600/10 via-purple-600/5 to-transparent dark:from-brand-600/20 dark:via-purple-600/10" />
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-12">
-          <div className="text-center max-w-3xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-brand-50 dark:bg-brand-500/10 border border-brand-200 dark:border-brand-500/20 text-brand-600 dark:text-brand-400 text-sm font-medium mb-6">
-              <Shield className="w-4 h-4" />
-              Trustless Security Protocol
-            </div>
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight">
-              <span className="text-gray-900 dark:text-white">Decentralized</span>{' '}
-              <span className="gradient-text">Bug Bounty</span>
-            </h1>
-            <p className="mt-6 text-lg text-gray-600 dark:text-gray-400 leading-relaxed">
-              Submit encrypted vulnerability reports, get judged by an on-chain committee, and receive automated escrow payouts — all without trusting a centralized intermediary.
-            </p>
-            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link href="/submit"><button className="btn-primary text-base">Submit a Report</button></Link>
-              <Link href="/committee"><button className="btn-secondary text-base">Committee Panel</button></Link>
-            </div>
+    <div className="animate-fade-in space-y-16 pb-20">
+      {/* Hero Section */}
+      <section className="relative overflow-hidden pt-20 pb-16">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(16,185,129,0.05),transparent_50%)]" />
+        <div className="relative max-w-7xl mx-auto px-4 text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold uppercase tracking-widest mb-8">
+            <Shield className="w-4 h-4" /> Trusted Decentralized Security
+          </div>
+          <h1 className="text-5xl sm:text-7xl font-extrabold tracking-tight mb-8">
+            <span className="text-white">Secure Your Code with</span><br />
+            <span className="gradient-text">Incentivized Intelligence</span>
+          </h1>
+          <p className="max-w-2xl mx-auto text-lg text-gray-500 leading-relaxed mb-12">
+            The first fully autonomous bug bounty platform on Arbitrum. Submit findings, earn rewards, and adjudicate disputes through trustless on-chain governance.
+          </p>
+          <div className="flex flex-wrap justify-center gap-4">
+            <Link href="/submit" className="btn-primary py-4 px-8 text-base">Start Hunting</Link>
+            <Link href="/admin" className="btn-secondary py-4 px-8 text-base">Launch Multi-Sig Program</Link>
           </div>
         </div>
       </section>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16 space-y-12">
-        {/* Stats */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 -mt-4">
-          <StatCard icon={Target} label="Active Bounties" value={bountyCount ? bountyCount.toString() : '0'} trend="Live On-Chain" color="brand" />
-          <StatCard icon={Coins} label="Total Rewards Locked" value={`${totalRewardsUsdc.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC`} trend="Secured" color="emerald" />
-          <StatCard icon={FileText} label="Reports Submitted" value={totalReportsSubmitted.toString()} color="amber" />
-          <StatCard icon={Scale} label="Disputes Resolved" value="—" color="rose" />
+      {/* Main Content Area */}
+      <div className="max-w-7xl mx-auto px-4 space-y-16">
+        {/* Statistics Grid */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <StatCard icon={Target} label="Programs Online" value={activeBountiesCount.toString()} trend="Global Active" color="brand" />
+          <StatCard icon={Coins} label="Locked Liquidity" value={`${totalEscrowUsdc.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC`} trend="Audited Escrow" color="emerald" />
+          <StatCard icon={FileText} label="Secured Reports" value={totalReportsCount.toString()} trend="Total Intercepted" color="amber" />
+          <StatCard icon={Users} label="Unique Organizations" value={uniqueOwners.toString()} trend="Decentralized Entities" color="rose" />
         </section>
 
-        {/* Quick Actions + Activity */}
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {[
-              { href: '/submit', icon: Send, title: 'Submit Report', desc: 'Encrypt & submit a vulnerability', color: 'from-brand-500 to-purple-600', shadow: 'shadow-brand-500/20' },
-              { href: '/committee', icon: Users, title: 'Committee', desc: 'Review and vote on reports', color: 'from-emerald-500 to-teal-600', shadow: 'shadow-emerald-500/20' },
-              { href: '/dispute', icon: AlertTriangle, title: 'Disputes', desc: 'Manage appeals & escalations', color: 'from-amber-500 to-orange-600', shadow: 'shadow-amber-500/20' },
-            ].map(card => (
-              <Link key={card.href} href={card.href} className="glass-card-hover p-6 flex flex-col items-center text-center group">
-                <div className={`p-3 rounded-2xl bg-gradient-to-br ${card.color} shadow-lg ${card.shadow} mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                  <card.icon className="w-6 h-6 text-white" />
-                </div>
-                <h3 className="font-bold text-gray-900 dark:text-white">{card.title}</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{card.desc}</p>
-              </Link>
-            ))}
-          </div>
-          <ActivityFeed />
-        </section>
-
-        {/* How It Works */}
+        {/* Bounty Explorer */}
         <section>
-          <h2 className="section-title text-center mb-8">How It Works</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {[
-              { step: '01', icon: Lock, title: 'Encrypt', desc: 'Your report is encrypted in your browser with AES-256-GCM before leaving your device.' },
-              { step: '02', icon: Zap, title: 'Submit On-Chain', desc: 'Cryptographic hashes and your stake are committed to the blockchain. The data stays on IPFS.' },
-              { step: '03', icon: Users, title: 'Committee Review', desc: 'An elected committee decrypts and evaluates your report within the SLA deadline.' },
-              { step: '04', icon: Coins, title: 'Get Paid', desc: 'If accepted, the escrow automatically releases the reward to your wallet.' },
-            ].map(item => (
-              <div key={item.step} className="glass-card p-6 text-center animate-slide-up">
-                <div className="text-xs font-bold text-brand-500 dark:text-brand-400 mb-3">STEP {item.step}</div>
-                <div className="inline-flex p-3 rounded-xl bg-gray-50 dark:bg-slate-800 mb-3">
-                  <item.icon className="w-6 h-6 text-gray-600 dark:text-gray-300" />
-                </div>
-                <h3 className="font-bold text-gray-900 dark:text-white">{item.title}</h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 leading-relaxed">{item.desc}</p>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-8">
+             <h2 className="text-3xl font-bold text-white flex items-center gap-3">
+                <Target className="w-8 h-8 text-brand-500" /> Bounty Explorer
+             </h2>
+             <div className="flex gap-2">
+                <span className="px-3 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs font-bold text-gray-500">SORT BY: REWARD</span>
+             </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {(bountiesData || []).map((res: any, i: number) => {
+               if (res.status !== 'success' || !res.result) return null;
+               const core = res.result;
+               const token = getTokenByAddress(core[1]);
+               const isActive = statesData?.[i]?.status === 'success' ? (statesData[i].result as any)[5] : false;
+
+               return (
+                 <div key={i} className="glass-card p-6 flex flex-col group hover:scale-[1.02] transition-all">
+                    <div className="flex justify-between items-start mb-6">
+                       <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center">
+                          <img src={token?.logoUrl} alt={token?.symbol} className="w-6 h-6" />
+                       </div>
+                       <span className={`px-2 py-1 rounded text-[10px] font-bold border uppercase tracking-wider ${isActive ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-rose-500/10 text-rose-500 border-rose-500/20'}`}>
+                          {isActive ? 'Live' : 'Paused'}
+                       </span>
+                    </div>
+
+                    <h3 className="text-xl font-bold text-white mb-2 group-hover:text-brand-400 transition-colors">Program Instance #{i}</h3>
+                    
+                    <div className="flex flex-wrap gap-2 mb-6">
+                       <span className="px-2 py-1 rounded-md bg-slate-800/50 text-[10px] text-gray-400 font-bold border border-slate-700">L1 SMART CONTRACT</span>
+                       <span className="px-2 py-1 rounded-md bg-slate-800/50 text-[10px] text-gray-400 font-bold border border-slate-700">WEB3 ARCH</span>
+                    </div>
+
+                    <div className="mt-auto pt-6 border-t border-slate-800 flex justify-between items-center">
+                       <div>
+                          <div className="text-[10px] font-bold text-gray-600 uppercase mb-1">Max Reward</div>
+                          <div className="text-lg font-bold text-white">{formatTokenAmount(core[2], token?.decimals)} {token?.symbol}</div>
+                       </div>
+                       <Link href={`/submit?bountyId=${i}`} className="p-2 rounded-lg bg-brand-500/5 border border-brand-500/10 text-brand-500 hover:bg-brand-500 hover:text-white transition-all">
+                          <Send className="w-5 h-5" />
+                       </Link>
+                    </div>
+                 </div>
+               );
+            })}
           </div>
         </section>
 
-        {/* FAQ */}
-        <section className="max-w-3xl mx-auto">
-          <h2 className="section-title text-center mb-8">Frequently Asked Questions</h2>
-          <div className="space-y-3">
-            {faqItems.map((item, i) => (
-              <div key={i} className="glass-card overflow-hidden">
-                <button onClick={() => setOpenFaq(openFaq === i ? null : i)} className="w-full flex items-center justify-between p-5 text-left">
-                  <span className="font-semibold text-gray-900 dark:text-white text-sm">{item.q}</span>
-                  <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform duration-200 ${openFaq === i ? 'rotate-180' : ''}`} />
-                </button>
-                {openFaq === i && (
-                  <div className="px-5 pb-5 text-sm text-gray-600 dark:text-gray-400 leading-relaxed animate-fade-in">{item.a}</div>
-                )}
+        {/* Activity & Features */}
+        <section className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+           <div className="lg:col-span-8 space-y-8">
+              <div className="glass-card p-10 bg-gradient-to-br from-slate-900 to-slate-950">
+                 <h2 className="text-3xl font-bold text-white mb-6">Autonomous Security Protocol</h2>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {[
+                      { icon: Lock, title: 'E2E Encryption', desc: 'Reports are encrypted in the browser using AES-256-GCM. Decryption keys never leave authorized committee devices.' },
+                      { icon: Zap, title: 'Instant Settlement', desc: 'Once a report is accepted by the committee, reward payouts are triggered automatically from the on-chain escrow.' },
+                      { icon: Scale, title: 'Dispute Mediation', desc: 'Fair adjudication process via commit-reveal re-voting schemes, preventing herd mentality and ensuring integrity.' },
+                      { icon: Users, title: 'Expert Committees', desc: 'Bounty owners can appoint specialized technical committees to evaluate complex vulnerability submissions.' },
+                    ].map(f => (
+                      <div key={f.title} className="flex gap-4">
+                        <div className="shrink-0 w-10 h-10 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center">
+                          <f.icon className="w-5 h-5 text-brand-500" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-white mb-1">{f.title}</h4>
+                          <p className="text-sm text-gray-500 leading-relaxed">{f.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                 </div>
               </div>
-            ))}
-          </div>
+           </div>
+           <div className="lg:col-span-4">
+              <ActivityFeed />
+           </div>
         </section>
       </div>
     </div>

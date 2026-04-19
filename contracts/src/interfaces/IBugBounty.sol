@@ -36,6 +36,7 @@ interface IBugBounty {
         uint256 stakeAmount;
         uint256 escrowBalance;
         uint256 appealBond;
+        bytes32 metadataCidDigest; // Added for tags/desc
     }
 
     struct Report {
@@ -64,7 +65,8 @@ interface IBugBounty {
         uint256 appealBond,
         uint64 submissionDeadline,
         uint8 committeeSize,
-        uint8 thresholdK
+        uint8 thresholdK,
+        string metadataCid
     );
 
     event BountyFunded(uint256 indexed bountyId, uint256 amount);

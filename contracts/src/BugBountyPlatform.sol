@@ -66,7 +66,9 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard, ERC2771Context {
         address[] calldata committee,
         uint8 thresholdK,
         uint32 disputeCommitSeconds,
-        uint32 disputeRevealSeconds
+        uint32 disputeRevealSeconds,
+        string calldata metadataCid,
+        uint256 initialFund
     ) external returns (uint256 bountyId) {
         if (committee.length == 0) revert InvalidCommittee();
         if (thresholdK == 0 || thresholdK > committee.length) revert InvalidThreshold();
@@ -92,6 +94,13 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard, ERC2771Context {
         b.stakeAmount = stakeAmount;
         b.escrowBalance = 0;
         b.appealBond = appealBond;
+        b.metadataCidDigest = keccak256(abi.encodePacked(metadataCid));
+
+        if (initialFund > 0) {
+            b.token.safeTransferFrom(_msgSender(), address(escrow), initialFund);
+            escrow.deposit(bountyId, initialFund);
+            b.escrowBalance = initialFund;
+        }
 
         for (uint256 i = 0; i < committee.length; i++) {
             address member = committee[i];
@@ -108,8 +117,13 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard, ERC2771Context {
             appealBond,
             submissionDeadline,
             uint8(committee.length),
-            thresholdK
+            thresholdK,
+            metadataCid
         );
+
+        if (initialFund > 0) {
+            emit BountyFunded(bountyId, initialFund);
+        }
     }
 
     function fundBounty(uint256 bountyId, uint256 amount) external onlyBountyOwner(bountyId) {
@@ -353,7 +367,8 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard, ERC2771Context {
         uint32 reviewSLA,
         uint32 rateLimitWindow,
         uint16 stakeEscalationBps,
-        uint8 maxInWindow
+        uint8 maxInWindow,
+        bytes32 metadataCidDigest
     ) {
         Bounty storage b = _bounties[bountyId];
         return (
@@ -366,7 +381,8 @@ contract BugBountyPlatform is IBugBounty, ReentrancyGuard, ERC2771Context {
             b.reviewSLA,
             b.rateLimitWindow,
             b.stakeEscalationBps,
-            b.maxInWindow
+            b.maxInWindow,
+            b.metadataCidDigest
         );
     }
 
