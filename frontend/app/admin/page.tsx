@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { useAccount, useReadContract, useReadContracts } from 'wagmi';
 import { BUG_BOUNTY_PLATFORM_ABI, CONTRACT_ADDRESS } from '@/services/contracts';
 import { AdminGuard } from '@/components/AdminGuard';
-import { Shield, FileText, CheckCircle, XCircle, AlertTriangle, ChevronRight, Clock, Plus } from 'lucide-react';
+import { Shield, FileText, CheckCircle, XCircle, AlertTriangle, ChevronRight, Clock, Plus, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 
 const STATUS_MAP = ['Submitted', 'Accepted', 'Rejected', 'Disputed', 'Finalized'];
@@ -21,10 +21,11 @@ function AdminDashboard() {
   const [selectedBountyId, setSelectedBountyId] = useState<number | null>(null);
 
   // 1. Get total bounties
-  const { data: bountyCountStr } = useReadContract({
+  const { data: bountyCountStr, error: bountyCountError, isLoading: isBountyCountLoading } = useReadContract({
     address: CONTRACT_ADDRESS as `0x${string}`,
     abi: BUG_BOUNTY_PLATFORM_ABI as any,
-    functionName: 'bountyCount'
+    functionName: 'bountyCount',
+    chainId: 421614,
   });
 
   const bountyCount = Number(bountyCountStr || 0);
@@ -41,15 +42,26 @@ function AdminDashboard() {
     contracts: bountyCalls,
   });
 
-  // Filter bounties owned by admin
-  const myBounties = bountiesData
+  // Get all bounties (filter by connected address as owner)
+  const allBounties = bountiesData
     ?.map((res, i) => {
       if (res.status === 'success' && res.result) {
         return { id: i, core: res.result as any };
       }
       return null;
     })
-    .filter(b => b !== null && String(b.core[0]).toLowerCase() === String(address).toLowerCase()) || [];
+    .filter(b => b !== null) || [];
+
+  const myBounties = allBounties.filter(b => String(b.core[0]).toLowerCase() === String(address).toLowerCase());
+  const otherBounties = allBounties.filter(b => String(b.core[0]).toLowerCase() !== String(address).toLowerCase());
+
+  // Debug logging
+  console.log('[Admin Dashboard] Contract:', CONTRACT_ADDRESS);
+  console.log('[Admin Dashboard] Bounty Count Raw:', bountyCountStr);
+  console.log('[Admin Dashboard] Bounty Count Parsed:', bountyCount);
+  console.log('[Admin Dashboard] Bounty Count Error:', bountyCountError);
+  console.log('[Admin Dashboard] Bounties Data:', bountiesData);
+  console.log('[Admin Dashboard] All Bounties:', allBounties);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 animate-fade-in">
@@ -76,34 +88,54 @@ function AdminDashboard() {
         <div className="col-span-1 space-y-4">
           <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
             <FileText className="w-5 h-5 text-gray-400" />
-            My Bounties {myBounties.length > 0 && `(${myBounties.length})`}
+            All Bounties ({allBounties.length})
           </h2>
-          
-          {myBounties.length === 0 ? (
+
+          {isBountyCountLoading ? (
             <div className="glass-card p-6 text-center text-gray-500">
-              No bounties found for your address.
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading bounties...
+              </div>
+            </div>
+          ) : bountyCountError ? (
+            <div className="glass-card p-6 text-center text-red-500">
+              <AlertTriangle className="w-5 h-5 mx-auto mb-2" />
+              <div>Error loading bounties</div>
+              <div className="text-xs mt-2 opacity-75">{String(bountyCountError)}</div>
+            </div>
+          ) : allBounties.length === 0 ? (
+            <div className="glass-card p-6 text-center text-gray-500">
+              No bounties found. Create one to get started.
             </div>
           ) : (
             <div className="space-y-3">
-              {myBounties.map((b) => (
-                <div
-                  key={b.id}
-                  onClick={() => setSelectedBountyId(b.id)}
-                  className={`glass-card p-4 cursor-pointer transition-all ${
-                    selectedBountyId === b.id 
-                      ? 'ring-2 ring-brand-500 bg-brand-50 dark:bg-brand-500/10' 
-                      : 'hover:border-gray-300 dark:hover:border-slate-600'
-                  }`}
-                >
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-gray-900 dark:text-white">Bounty #{b.id}</span>
-                    <ChevronRight className={`w-5 h-5 ${selectedBountyId === b.id ? 'text-brand-500' : 'text-gray-400'}`} />
+              {allBounties.map((b) => {
+                const isMine = String(b.core[0]).toLowerCase() === String(address).toLowerCase();
+                return (
+                  <div
+                    key={b.id}
+                    onClick={() => setSelectedBountyId(b.id)}
+                    className={`glass-card p-4 cursor-pointer transition-all ${
+                      selectedBountyId === b.id
+                        ? 'ring-2 ring-brand-500 bg-brand-50 dark:bg-brand-500/10'
+                        : 'hover:border-gray-300 dark:hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-gray-900 dark:text-white">Bounty #{b.id}</span>
+                      {!isMine && (
+                        <span className="text-xs bg-gray-100 dark:bg-slate-700 text-gray-500 px-2 py-1 rounded">
+                          Other
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 text-sm text-gray-500 truncate font-mono">
+                      Token: {String(b.core[1]).slice(0, 10)}...{String(b.core[1]).slice(-8)}
+                    </div>
                   </div>
-                  <div className="mt-2 text-sm text-gray-500 truncate font-mono">
-                    Token: {String(b.core[1])}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -117,6 +149,11 @@ function AdminDashboard() {
               <p className="text-gray-500 mt-2 max-w-sm">
                 Choose a bounty from the list to view its submitted reports.
               </p>
+              {allBounties.length > 0 && myBounties.length === 0 && (
+                <p className="text-amber-600 dark:text-amber-400 text-sm mt-4">
+                  Note: You can view all bounties, but you can only manage bounties you own.
+                </p>
+              )}
             </div>
           ) : (
             <ReportsPanel bountyId={selectedBountyId} />

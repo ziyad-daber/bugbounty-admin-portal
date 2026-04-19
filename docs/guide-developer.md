@@ -66,7 +66,7 @@ npm install
 ### 2. Start Local Node
 ```bash
 # In contracts directory
-anvil --fork-url https://arb-sepolia.g.alchemy.com/v2/YOUR_KEY
+anvil --fork-url https://arb-sepolia.g.alchemy.com/v2/oIgcA01JEWaxxSOMF8XQ7
 
 # Or use Hardhat
 npx hardhat node

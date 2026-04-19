@@ -7,13 +7,20 @@ import { arbitrumSepolia, foundry } from 'wagmi/chains'
 import { injected } from 'wagmi/connectors'
 
 export const config = createConfig({
-  chains: [foundry, arbitrumSepolia],
+  chains: [arbitrumSepolia, foundry],
   connectors: [
     injected(),
   ],
   transports: {
+    [arbitrumSepolia.id]: http('https://sepolia-rollup.arbitrum.io/rpc', {
+      fetchOptions: {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      },
+    }),
     [foundry.id]: http(),
-    [arbitrumSepolia.id]: http(),
   },
 })
 

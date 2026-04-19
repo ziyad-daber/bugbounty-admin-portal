@@ -1,5 +1,5 @@
 'use client'
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { BUG_BOUNTY_PLATFORM_ABI, CONTRACT_ADDRESS } from '@/services/contracts';
 import { AdminGuard } from '@/components/AdminGuard';
@@ -17,7 +17,7 @@ export default function CreateBountyPage() {
 function CreateBountyForm() {
   const { writeContractAsync } = useWriteContract();
   
-  const [token, setToken] = useState('0x0000000000000000000000000000000000000000'); // Mock default
+  const [token, setToken] = useState('0x622703b79B515d93F5c48C7C7dfdCf24d110f1CC'); // MockUSDC (deployed)
   const [rewardAmount, setRewardAmount] = useState('5000');
   const [stakeAmount, setStakeAmount] = useState('50');
   const [appealBond, setAppealBond] = useState('100');
@@ -35,7 +35,7 @@ function CreateBountyForm() {
   const [maxActiveSubmissions, setMaxActiveSubmissions] = useState('1');
   
   // Committee
-  const [committeeStr, setCommitteeStr] = useState('0x1111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222');
+  const [committeeStr, setCommitteeStr] = useState('0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc,0x90f79bf6eb2c4f870365e785982e1f101e93b906,0x15d34aaf54267db7d7c367839aaf71a00a2c6a65,0x9965507d1a55bcd269ec60bad4a3ac85b5c43d65');
   const [thresholdK, setThresholdK] = useState('2');
   const [disputeCommitDays, setDisputeCommitDays] = useState('3');
   const [disputeRevealDays, setDisputeRevealDays] = useState('6');
@@ -43,7 +43,19 @@ function CreateBountyForm() {
   const [status, setStatus] = useState('');
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>(undefined);
 
-  const { isSuccess: isConfirmed, isPending: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isSuccess: isConfirmed, isPending: isConfirming, isError: isConfirmError, error: confirmError } = useWaitForTransactionReceipt({
+    hash: txHash,
+    chainId: 421614,
+    pollingInterval: 2000,
+  });
+
+  // Handle confirmation errors
+  useEffect(() => {
+    if (isConfirmError && confirmError) {
+      console.error('Confirmation error:', confirmError);
+      setStatus(`Failed to confirm: ${confirmError.message || 'Unknown error'}`);
+    }
+  }, [isConfirmError, confirmError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +96,8 @@ function CreateBountyForm() {
         address: CONTRACT_ADDRESS as `0x${string}`,
         functionName: 'createBounty',
         args: args,
+        maxFeePerGas: BigInt(50000000000), // 50 gwei
+        maxPriorityFeePerGas: BigInt(1000000000), // 1 gwei
       });
 
       setTxHash(hash);
@@ -214,9 +228,21 @@ function CreateBountyForm() {
         </button>
 
         {status && (
-          <div className={`p-4 rounded-xl text-sm font-medium flex items-center gap-3 ${status.includes('Failed') ? 'bg-red-50 text-red-700' : 'bg-brand-50 text-brand-700'}`}>
-            {status.includes('Failed') ? <AlertCircle className="w-5 h-5 flex-shrink-0" /> : <Shield className="w-5 h-5 flex-shrink-0" />}
-            {status}
+          <div className={`p-4 rounded-xl text-sm font-medium flex flex-col gap-2 ${status.includes('Failed') ? 'bg-red-50 text-red-700' : 'bg-brand-50 text-brand-700'}`}>
+            <div className="flex items-center gap-3">
+              {status.includes('Failed') ? <AlertCircle className="w-5 h-5 flex-shrink-0" /> : <Shield className="w-5 h-5 flex-shrink-0" />}
+              <span>{status}</span>
+            </div>
+            {txHash && (
+              <a
+                href={`https://sepolia.arbiscan.io/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs underline opacity-75 hover:opacity-100"
+              >
+                View on Arbiscan →
+              </a>
+            )}
           </div>
         )}
       </form>

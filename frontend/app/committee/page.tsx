@@ -17,7 +17,14 @@ export default function CommitteePage() {
   const exec = async (fn: string, args: any[], label: string) => {
     try {
       setStatus(`${label}...`);
-      await writeContractAsync({ abi: BUG_BOUNTY_PLATFORM_ABI as any, address: CONTRACT_ADDRESS as `0x${string}`, functionName: fn, args });
+      await writeContractAsync({
+        abi: BUG_BOUNTY_PLATFORM_ABI as any,
+        address: CONTRACT_ADDRESS as `0x${string}`,
+        functionName: fn,
+        args,
+        maxFeePerGas: BigInt(50000000000),
+        maxPriorityFeePerGas: BigInt(1000000000),
+      });
       setStatus(`${label} — Success!`);
     } catch (e: any) { setStatus(`Error: ${e.message}`); }
   };

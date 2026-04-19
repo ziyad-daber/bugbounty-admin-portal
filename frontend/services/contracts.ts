@@ -2,6 +2,13 @@ import { ethers } from 'ethers';
 
 export const BUG_BOUNTY_PLATFORM_ABI = [
   {
+    "inputs": [],
+    "name": "bountyCount",
+    "outputs": [{"name": "", "type": "uint256"}],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [
       {"name": "token", "type": "address"},
       {"name": "rewardAmount", "type": "uint256"},
@@ -220,7 +227,7 @@ export const BUG_BOUNTY_PLATFORM_ABI = [
   }
 ] as const;
 
-export const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512") as `0x${string}`;
+export const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "0xd26ffB5e404F5Dc3bF07d9c214957b2731E8EB9b") as `0x${string}`;
 
 export async function getContract(signer: ethers.Signer | ethers.Provider) {
     return new ethers.Contract(CONTRACT_ADDRESS, BUG_BOUNTY_PLATFORM_ABI, signer);

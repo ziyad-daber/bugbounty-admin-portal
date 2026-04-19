@@ -97,7 +97,7 @@ export default function SubmitReportPage() {
       setStatus('Encrypting report locally...');
       const payload = JSON.stringify({ title, steps: stepsText, impact, poc, pdfAttachment: pdfBase64 });
       const bountyId = parseInt(bountyIdStr);
-      const { ciphertext, iv } = await encryptData(key, payload, 31337, bountyId);
+      const { ciphertext, iv } = await encryptData(key, payload, 421614, bountyId);
 
       setCurrentStep(1);
       setStatus('Uploading encrypted payload to IPFS...');
@@ -115,7 +115,9 @@ export default function SubmitReportPage() {
           address: tokenAddress as `0x${string}`,
           functionName: 'approve',
           args: [CONTRACT_ADDRESS as `0x${string}`, BigInt(stakeAmount)],
-          chainId: 31337,
+          chainId: 421614,
+          maxFeePerGas: BigInt(50000000000),
+          maxPriorityFeePerGas: BigInt(1000000000),
         });
       }
 
@@ -132,7 +134,9 @@ export default function SubmitReportPage() {
         address: CONTRACT_ADDRESS as `0x${string}`,
         functionName: 'submitReport',
         args: [BigInt(bountyId), salt as `0x${string}`, cidDigest as `0x${string}`, hSteps as `0x${string}`, hImpact as `0x${string}`, hPoc as `0x${string}`],
-        chainId: 31337,
+        chainId: 421614,
+        maxFeePerGas: BigInt(50000000000),
+        maxPriorityFeePerGas: BigInt(1000000000),
       });
 
       setCurrentStep(3);

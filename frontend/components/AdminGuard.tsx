@@ -39,8 +39,8 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // FORCE Anvil Localhost Network
-  if (chainId !== 31337) {
+  // Require Arbitrum Sepolia
+  if (chainId !== 421614) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[70vh] px-4">
         <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-md w-full text-center shadow-xl">
@@ -51,14 +51,14 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
             Wrong Network Detected
           </h2>
           <p className="text-gray-400 mb-8 max-w-sm mx-auto">
-            Your MetaMask is connected to an unsupported network (Chain ID: {chainId}). You must switch to local Anvil (Chain ID: 31337).
+            Your wallet is connected to chain {chainId}. Please switch to Arbitrum Sepolia (Chain ID: 421614).
           </p>
           <div className="flex justify-center">
-            <button 
-              onClick={() => switchChain({ chainId: 31337 })}
+            <button
+              onClick={() => switchChain({ chainId: 421614 })}
               className="px-6 py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-bold"
             >
-              Switch to Anvil Devnet
+              Switch to Arbitrum Sepolia
             </button>
           </div>
         </div>
